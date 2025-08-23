@@ -3,12 +3,14 @@ from datetime import datetime
 from typing import Dict, List
 
 from models import Order, OrderType, OrderStatus
+from brokers import BrokerAPI
 
 class OrderManager:
-    def __init__(self, data_manager):
+    def __init__(self, data_manager, broker: BrokerAPI | None = None):
         self.orders: Dict[str, Order] = {}
         self.position_orders: Dict[str, List[str]] = {}
         self.data_manager = data_manager
+        self.broker = broker
         self.logger = logging.getLogger(f"{__name__}.OrderManager")
     
     def place_bracket_order(self, symbol, quantity, entry_price, stop_loss, take_profit1, take_profit2=None):
@@ -62,6 +64,7 @@ class OrderManager:
         self.orders[entry_id] = entry_order
         self.orders[stop_id] = stop_order
         self.orders[tp1_id] = tp1_order
+        self.position_orders.setdefault(entry_id, [entry_id]).extend([stop_id, tp1_id])
         
         # Create TP2 if specified
         if take_profit2:
@@ -78,6 +81,7 @@ class OrderManager:
             )
             entry_order.child_orders.append(tp2_id)
             self.orders[tp2_id] = tp2_order
+            self.position_orders[entry_id].append(tp2_id)
         
         # Save orders to database
         self.data_manager.save_order(entry_order)
@@ -85,6 +89,13 @@ class OrderManager:
         self.data_manager.save_order(tp1_order)
         if take_profit2:
             self.data_manager.save_order(tp2_order)
+
+        if self.broker:
+            self.broker.place_order(entry_order)
+            self.broker.place_order(stop_order)
+            self.broker.place_order(tp1_order)
+            if take_profit2:
+                self.broker.place_order(tp2_order)
         
         self.logger.info(f"Bracket order placed for {symbol}: entry@{entry_price}, stop@{stop_loss}")
         return entry_id
@@ -127,6 +138,8 @@ class OrderManager:
             self.orders[trail_id] = trail_order
             self.position_orders[position_id].append(trail_id)
             self.data_manager.save_order(trail_order)
+            if self.broker:
+                self.broker.place_order(trail_order)
             
             self.logger.info(f"Trailing stop order placed for {original_order.symbol}")
             return True
@@ -144,7 +157,8 @@ class OrderManager:
             return False
         
         try:
-            # In a real implementation, this would call the broker API
+            if self.broker:
+                self.broker.cancel_order(order_id)
             order.status = OrderStatus.PENDING_CANCEL
             self.data_manager.save_order(order)
             self.logger.info(f"Cancel requested for order {order_id}")

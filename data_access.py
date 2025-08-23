@@ -1,9 +1,10 @@
 import json
 import logging
 import sqlite3
+from datetime import datetime
 from typing import Dict
 
-from models import Order, Position
+from models import Order, Position, OrderStatus, OrderType, PositionStatus
 from config import DB_PATH
 
 
@@ -153,3 +154,54 @@ class DataManager:
                 order.timestamp
             ))
             conn.commit()
+
+    def load_positions(self) -> Dict[str, Position]:
+        """Load all positions from the database."""
+        with sqlite3.connect(self.db_path) as conn:
+            conn.row_factory = sqlite3.Row
+            cursor = conn.cursor()
+            cursor.execute("SELECT * FROM positions")
+            positions = {}
+            for row in cursor.fetchall():
+                positions[row["position_id"]] = Position(
+                    position_id=row["position_id"],
+                    symbol=row["symbol"],
+                    entry_time=datetime.fromisoformat(row["entry_time"]) if row["entry_time"] else None,
+                    entry_price=row["entry_price"],
+                    quantity=row["quantity"],
+                    status=PositionStatus(row["status"]),
+                    current_pnl=row["current_pnl"],
+                    realized_pnl=row["realized_pnl"],
+                    stop_price=row["stop_price"],
+                    exit_price=row["exit_price"],
+                    exit_time=datetime.fromisoformat(row["exit_time"]) if row["exit_time"] else None,
+                    score_components=json.loads(row["score_components"] or "{}"),
+                    risk_per_share=row["risk_per_share"],
+                )
+        return positions
+
+    def load_orders(self) -> Dict[str, Order]:
+        """Load all orders from the database."""
+        with sqlite3.connect(self.db_path) as conn:
+            conn.row_factory = sqlite3.Row
+            cursor = conn.cursor()
+            cursor.execute("SELECT * FROM orders")
+            orders = {}
+            for row in cursor.fetchall():
+                orders[row["order_id"]] = Order(
+                    order_id=row["order_id"],
+                    symbol=row["symbol"],
+                    order_type=OrderType(row["order_type"]),
+                    side=row["side"],
+                    quantity=row["quantity"],
+                    limit_price=row["limit_price"],
+                    stop_price=row["stop_price"],
+                    trail_amount=row["trail_amount"],
+                    status=OrderStatus(row["status"]),
+                    filled_quantity=row["filled_quantity"],
+                    avg_fill_price=row["avg_fill_price"],
+                    parent_order_id=row["parent_order_id"],
+                    child_orders=json.loads(row["child_orders"] or "[]"),
+                    timestamp=datetime.fromisoformat(row["timestamp"]) if row["timestamp"] else None,
+                )
+        return orders

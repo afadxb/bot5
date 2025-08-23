@@ -9,12 +9,15 @@ import json
 import requests
 from typing import Dict, List, Optional, Tuple
 
-from config import EASTERN_TZ, MARKET_OPEN, MARKET_CLOSE, FOUR_HOUR_TIMES
+from config import (ALPHAVANTAGE_API_KEY, EASTERN_TZ, MARKET_OPEN, MARKET_CLOSE,
+                    FOUR_HOUR_TIMES)
 from models import (MarketRegime, Order, OrderStatus, OrderType,
                     Position, PositionStatus)
 from data_access import DataManager
 from order_management import OrderManager
 from ibkr_client import IBKRClient, stock_contract
+from data_providers import AlphaVantageDataProvider
+from brokers import IBKRBroker
 
 class Indicators:
     @staticmethod
@@ -677,11 +680,12 @@ class SentimentAnalyzer:
         return entry_score, {"fg_index": fg_index, "news_sentiment": news_sentiment, "action": "adjusted"}
 
 class TradingBot:
-    def __init__(self):
+    def __init__(self, broker: IBKRBroker | None = None, data_provider: AlphaVantageDataProvider | None = None):
         self.logger = logging.getLogger(f"{__name__}.TradingBot")
 
         self.data_manager = DataManager()
-        self.order_manager = OrderManager(self.data_manager)
+        self.broker = broker
+        self.data_provider = data_provider
         self.scoring_engine = ScoringEngine()
         self.regime_detector = RegimeDetector()
         self.sentiment_analyzer = SentimentAnalyzer()
@@ -693,9 +697,16 @@ class TradingBot:
         try:
             self.ibkr = IBKRClient()
             self.ibkr.connect_and_run()
+            if self.broker is None:
+                self.broker = IBKRBroker(self.ibkr)
         except Exception as e:  # pragma: no cover - network dependent
             self.logger.warning(f"IBKR client unavailable: {e}")
             self.ibkr = None
+
+        if self.data_provider is None and ALPHAVANTAGE_API_KEY:
+            self.data_provider = AlphaVantageDataProvider(ALPHAVANTAGE_API_KEY)
+
+        self.order_manager = OrderManager(self.data_manager, broker=self.broker)
 
         self.positions = {}
         self.universe = self._load_sp100_universe()
@@ -1030,7 +1041,16 @@ class TradingBot:
                     return df
             except Exception as exc:  # pragma: no cover - network dependent
                 self.logger.warning(f"IBKR data fetch failed for {symbol}: {exc}")
+        if self.data_provider:
+            interval = self._provider_interval(timeframe)
+            df = self.data_provider.get_historical_data(symbol, interval, sample_periods)
+            if not df.empty:
+                return df
         return self._get_sample_data(symbol, sample_periods, timeframe)
+
+    def _provider_interval(self, timeframe: str) -> str:
+        mapping = {"1H": "60min", "4H": "240min", "1D": "daily"}
+        return mapping.get(timeframe, "60min")
 
     def _get_sample_data(self, symbol, periods, timeframe='1D'):
         """
