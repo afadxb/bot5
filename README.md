@@ -2,7 +2,8 @@
 
 This project provides a modular algorithmic trading bot. The code has been
 refactored into dedicated modules for data access, order management and
-strategy logic to improve readability and maintainability.
+strategy logic to improve readability and maintainability. It targets a
+Windows environment running Python 3.12.
 
 ## Project Structure
 
@@ -10,6 +11,8 @@ strategy logic to improve readability and maintainability.
 - `models.py` – dataclasses and enums that describe orders and positions.
 - `data_access.py` – database layer for persisting orders and positions.
 - `order_management.py` – routines for placing and managing orders.
+- `brokers.py` – lightweight abstractions for broker integrations.
+- `data_providers.py` – pluggable market data provider interfaces.
 - `strategy.py` – trading strategy, indicators and bot orchestration.
 - `main.py` – entry point that wires everything together.
 
@@ -24,14 +27,18 @@ LOG_FILE=trading_bot.log
 IBKR_HOST=127.0.0.1
 IBKR_PORT=7497
 IBKR_CLIENT_ID=1
+OPERATING_SYSTEM=windows
+PYTHON_VERSION=3.12
+ALPHAVANTAGE_API_KEY=
 ```
 
-Additional variables can be added as needed. Defaults are provided when the
-variables are absent.
+`ALPHAVANTAGE_API_KEY` is optional and enables the included Alpha Vantage
+data provider. Additional variables can be added as needed. Defaults are
+provided when the variables are absent.
 
 ## Development
 
-Create a virtual environment and install dependencies:
+Create a Python 3.12 virtual environment and install dependencies:
 
 ```
 pip install -r requirements.txt  # if available
