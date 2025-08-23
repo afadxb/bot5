@@ -9,9 +9,12 @@ from __future__ import annotations
 
 import logging
 import threading
+from dataclasses import dataclass
 from typing import List
 
 import pandas as pd
+
+logger = logging.getLogger(__name__)
 
 try:  # pragma: no cover - optional dependency
     from ibapi.client import EClient
@@ -19,10 +22,55 @@ try:  # pragma: no cover - optional dependency
     from ibapi.contract import Contract
     from ibapi.common import BarData
 except Exception:  # pragma: no cover - allow compilation without ibapi
-    EClient = object  # type: ignore
-    EWrapper = object  # type: ignore
-    Contract = object  # type: ignore
-    BarData = object  # type: ignore
+    class IBAPIUnavailableError(RuntimeError):
+        """Raised when the optional `ibapi` package is required but missing."""
+
+        def __init__(self) -> None:
+            super().__init__(
+                "Interactive Brokers 'ibapi' package is required. Install it to enable IBKR functionality."
+            )
+
+    class EClient:  # type: ignore
+        """Lightweight stand-in for the real IB API client."""
+
+        def __init__(self, *args, **kwargs) -> None:  # noqa: D401 - empty stub
+            """Accept arbitrary arguments to mirror the real client's signature."""
+
+        def _raise(self, *args, **kwargs) -> None:
+            raise IBAPIUnavailableError()
+
+        disconnect = _raise
+        connect = _raise
+        reqHistoricalData = _raise
+        run = _raise
+
+    class EWrapper:  # type: ignore
+        """Stub wrapper class used when `ibapi` is not available."""
+
+        def __init__(self, *args, **kwargs) -> None:  # pragma: no cover - stub
+            pass
+
+    @dataclass
+    class Contract:  # type: ignore
+        """Minimal contract representation for environments without `ibapi`."""
+
+        symbol: str = ""
+        secType: str = ""
+        exchange: str = ""
+        currency: str = ""
+
+    @dataclass
+    class BarData:  # type: ignore
+        """Simple container replicating fields of IBKR bar data."""
+
+        date: str = ""
+        open: float = 0.0
+        high: float = 0.0
+        low: float = 0.0
+        close: float = 0.0
+        volume: float = 0.0
+
+    logger.warning("`ibapi` package not available; IBKRClient methods will raise IBAPIUnavailableError")
 
 from config import IBKR_HOST, IBKR_PORT, IBKR_CLIENT_ID
 
