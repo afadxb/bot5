@@ -13,7 +13,7 @@ Windows environment running Python 3.12.
 - `order_management.py` – routines for placing and managing orders.
 - `brokers.py` – lightweight abstractions for broker integrations.
 - `data_providers.py` – pluggable market data provider interfaces, including
-  real-time streaming via the Alpha Vantage API.
+  real-time streaming via the Yahoo Finance API.
 - `strategy.py` – trading strategy, indicators and bot orchestration.
 - `main.py` – entry point that wires everything together.
 
@@ -30,20 +30,17 @@ IBKR_PORT=7496
 IBKR_CLIENT_ID=1
 OPERATING_SYSTEM=windows
 PYTHON_VERSION=3.12
-ALPHAVANTAGE_API_KEY=
 PUSHOVER_USER=
 PUSHOVER_TOKEN=
 DEBUG=0
 SP100_CSV=
 ```
 
-`ALPHAVANTAGE_API_KEY` is optional and enables the included Alpha Vantage
-data provider. When supplied the bot can fetch both historical and
-real-time quote data. `PUSHOVER_USER` and `PUSHOVER_TOKEN` enable optional
-push notifications via the [Pushover](https://pushover.net/) service. Set
-`DEBUG` to ``1`` for verbose logging. `SP100_CSV` should point to a CSV
-file containing the S&P 100 constituents. Additional variables can be
-added as needed. Defaults are provided when the variables are absent.
+`PUSHOVER_USER` and `PUSHOVER_TOKEN` enable optional push notifications via
+the [Pushover](https://pushover.net/) service. Set `DEBUG` to ``1`` for
+verbose logging. `SP100_CSV` should point to a CSV file containing the S&P
+100 constituents. Additional variables can be added as needed. Defaults are
+provided when the variables are absent.
 
 ## Development
 
@@ -62,10 +59,10 @@ pytest -q
 ## Notes
 
 The bot integrates with real broker APIs and market data providers. By
-default it retrieves market data from the Alpha Vantage API, while IBKR
-handles account management and order execution. The included
-`ibkr_client.py` demonstrates how to request historical data and submit
-basic orders while respecting their pacing limitations. Upon startup the bot
+default it retrieves market data from Yahoo Finance, while IBKR handles
+account management and order execution. The included `ibkr_client.py`
+demonstrates how to request historical data and submit basic orders while
+respecting their pacing limitations. Upon startup the bot
 logs the current IBKR cash balance, buying power and any open positions
 loaded from the local database.
 

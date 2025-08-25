@@ -10,6 +10,11 @@ from typing import Iterator, Optional, Tuple
 import pandas as pd
 import requests
 
+try:  # pragma: no cover - optional dependency
+    import yfinance as yf
+except Exception:  # pragma: no cover - allow import failure until installed
+    yf = None
+
 
 class DataProvider(ABC):
     """Abstract base class for market data providers."""
@@ -147,3 +152,70 @@ class AlphaVantageDataProvider(DataProvider):
 
         price = quote.get("05. price")
         return float(price) if price is not None else None
+
+
+class YahooDataProvider(DataProvider):
+    """Fetch historical and real-time data from Yahoo Finance using ``yfinance``."""
+
+    def __init__(self) -> None:
+        self.logger = logging.getLogger(__name__)
+
+    @staticmethod
+    def _map_interval(interval: str) -> str:
+        mapping = {
+            "1min": "1m",
+            "5min": "5m",
+            "15min": "15m",
+            "30min": "30m",
+            "60min": "60m",
+        }
+        return mapping.get(interval, "1h")
+
+    def get_historical_data(
+        self, symbol: str, interval: str, outputsize: str = "compact"
+    ) -> pd.DataFrame:
+        if yf is None:  # pragma: no cover - dependency missing
+            self.logger.error("yfinance is not available")
+            return pd.DataFrame()
+
+        yahoo_interval = self._map_interval(interval)
+        period = "7d" if outputsize == "compact" else "max"
+
+        try:
+            df = yf.download(
+                symbol,
+                period=period,
+                interval=yahoo_interval,
+                progress=False,
+            )
+        except Exception as exc:  # pragma: no cover - network dependent
+            self.logger.error("Yahoo Finance download failed: %s", exc)
+            return pd.DataFrame()
+
+        if df.empty:
+            return pd.DataFrame()
+
+        df = df.rename(
+            columns={
+                "Open": "open",
+                "High": "high",
+                "Low": "low",
+                "Close": "close",
+                "Volume": "volume",
+            }
+        )
+        df.index.name = "date"
+        return df[["open", "high", "low", "close", "volume"]]
+
+    def get_quote(self, symbol: str) -> Optional[float]:
+        if yf is None:  # pragma: no cover - dependency missing
+            self.logger.error("yfinance is not available")
+            return None
+
+        try:
+            ticker = yf.Ticker(symbol)
+            price = ticker.fast_info.get("last_price")
+            return float(price) if price is not None else None
+        except Exception as exc:  # pragma: no cover - network dependent
+            self.logger.error("Yahoo Finance quote request failed: %s", exc)
+            return None
