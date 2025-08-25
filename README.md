@@ -63,3 +63,4 @@ It mirrors the approach shown in the
 Upon startup the bot logs the current IBKR cash balance, buying power and any
 open positions loaded from the local database, providing immediate context for
 subsequent trading decisions.
+

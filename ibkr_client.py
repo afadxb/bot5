@@ -6,7 +6,7 @@ making one blocking request at a time. While minimal, the implementation is
 geared for production use with a real IBKR Gateway/TWS connection and can
 retrieve historical prices, account summaries and open positions, as well as
 submit or cancel basic orders.
-"""
+
 
 from __future__ import annotations
 
@@ -53,6 +53,7 @@ except Exception:  # pragma: no cover - allow compilation without ibapi
         placeOrder = _raise
         cancelOrder = _raise
         reqIds = _raise
+
         run = _raise
 
     class EWrapper:  # type: ignore
@@ -121,6 +122,7 @@ class IBKRClient(EWrapper, EClient):
         self._next_id_ready = threading.Event()
         self._positions: List[dict] = []
         self._positions_done = threading.Event()
+
 
     # ------------------------------------------------------------------
     # Connection management
@@ -245,7 +247,6 @@ class IBKRClient(EWrapper, EClient):
         self._positions_done.wait()
         self.cancelPositions()
         return list(self._positions)
-
 
 def stock_contract(symbol: str) -> Contract:
     """Create a SMART-routed US stock contract."""
