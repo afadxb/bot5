@@ -34,14 +34,16 @@ ALPHAVANTAGE_API_KEY=
 PUSHOVER_USER=
 PUSHOVER_TOKEN=
 DEBUG=0
+SP100_CSV=
 ```
 
 `ALPHAVANTAGE_API_KEY` is optional and enables the included Alpha Vantage
 data provider. When supplied the bot can fetch both historical and
 real-time quote data. `PUSHOVER_USER` and `PUSHOVER_TOKEN` enable optional
 push notifications via the [Pushover](https://pushover.net/) service. Set
-`DEBUG` to ``1`` for verbose logging. Additional variables can be added as
-needed. Defaults are provided when the variables are absent.
+`DEBUG` to ``1`` for verbose logging. `SP100_CSV` should point to a CSV
+file containing the S&P 100 constituents. Additional variables can be
+added as needed. Defaults are provided when the variables are absent.
 
 ## Development
 
@@ -51,7 +53,7 @@ Create a Python 3.12 virtual environment and install dependencies:
 pip install -r requirements.txt  # if available
 ```
 
-Run the (currently empty) test suite:
+Run the test suite:
 
 ```
 pytest -q
@@ -59,15 +61,11 @@ pytest -q
 
 ## Notes
 
-The strategy logic and data handling routines are illustrative. In a real
-trading environment these modules integrate with broker APIs and data
-providers. By default the bot retrieves market data from the Alpha Vantage
-API, while IBKR is used for account management and order execution. The
-included `ibkr_client.py` demonstrates how to request historical data and
-submit basic orders while respecting their pacing limitations, following their [TWS API notes and limitations](https://www.interactivebrokers.com/campus/ibkr-api-page/twsapi-doc/#notes-and-limitations).
-It mirrors the approach shown in the
-"[Using technical indicators with TWS API](https://www.interactivebrokers.com/campus/ibkr-quant-news/using-technical-indicators-with-tws-api/)" article.
-Upon startup the bot logs the current IBKR cash balance, buying power and any
-open positions loaded from the local database, providing immediate context for
-subsequent trading decisions.
+The bot integrates with real broker APIs and market data providers. By
+default it retrieves market data from the Alpha Vantage API, while IBKR
+handles account management and order execution. The included
+`ibkr_client.py` demonstrates how to request historical data and submit
+basic orders while respecting their pacing limitations. Upon startup the bot
+logs the current IBKR cash balance, buying power and any open positions
+loaded from the local database.
 
