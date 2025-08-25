@@ -1,26 +1,40 @@
 # Trading Bot
 
-This project provides a modular algorithmic trading bot. The code has been
-refactored into dedicated modules for data access, order management and
-strategy logic to improve readability and maintainability. It targets a
-Windows environment running Python 3.12.
+This repository contains a fully modular algorithmic trading bot aimed at
+automating equity trades.  Each piece of functionality – from data retrieval to
+order execution – lives in a small, well documented module.  The code targets
+Python 3.12 and has minimal external dependencies, making it suitable for local
+experimentation or further extension.
 
-## Project Structure
+## Features
 
-- `config.py` – loads environment variables and defines common constants.
-- `models.py` – dataclasses and enums that describe orders and positions.
-- `data_access.py` – database layer for persisting orders and positions.
-- `order_management.py` – routines for placing and managing orders.
-- `brokers.py` – lightweight abstractions for broker integrations.
-- `data_providers.py` – pluggable market data provider interfaces, including
-  real-time streaming via the Yahoo Finance API.
-- `strategy.py` – trading strategy, indicators and bot orchestration.
-- `main.py` – entry point that wires everything together.
+- Pulls historical and real‑time market data from Yahoo Finance or Alpha Vantage
+- Persists orders, positions and analytics snapshots to a local SQLite database
+- Scores symbols using a rich set of technical indicators and market regime
+  filters
+- Places bracket orders and manages stops through a pluggable broker interface
+- Optional push notifications via the Pushover service
+
+## Repository Layout
+
+The project is intentionally split into small modules to keep concerns isolated:
+
+| Module | Description |
+| ------ | ----------- |
+| `config.py` | Loads environment variables and defines global constants |
+| `models.py` | Dataclasses and enums representing orders and positions |
+| `data_access.py` | SQLite persistence for orders, positions and analytics |
+| `order_management.py` | High level order submission and modification logic |
+| `brokers.py` | Lightweight abstractions for broker integrations (IBKR) |
+| `data_providers.py` | Interfaces for external market data sources |
+| `strategy.py` | Trading strategy, indicator helpers and `TradingBot` orchestration |
+| `alerts.py` | Convenience wrapper for Pushover notifications |
+| `main.py` | Command line entry point to run the bot |
 
 ## Configuration
 
-Runtime configuration is provided through a `.env` file. The following
-parameters are supported:
+Runtime configuration is supplied through a `.env` file located in the project
+root.  The following variables are recognised:
 
 ```
 DB_PATH=trading_bot.db
@@ -36,21 +50,33 @@ DEBUG=0
 SP100_CSV=
 ```
 
-`PUSHOVER_USER` and `PUSHOVER_TOKEN` enable optional push notifications via
-the [Pushover](https://pushover.net/) service. Set `DEBUG` to ``1`` for
-verbose logging. `SP100_CSV` should point to a CSV file containing the S&P
-100 constituents. Additional variables can be added as needed. Defaults are
-provided when the variables are absent.
+`PUSHOVER_USER` and `PUSHOVER_TOKEN` enable optional push notifications via the
+[Pushover](https://pushover.net/) service.  Set `DEBUG` to ``1`` for verbose
+logging.  `SP100_CSV` should point to a CSV file containing the S&P 100
+constituents.  Defaults are provided when the variables are absent.
 
-## Development
+## Installation
 
 Create a Python 3.12 virtual environment and install dependencies:
 
 ```
-pip install -r requirements.txt  # if available
+pip install -r requirements.txt
 ```
 
-Run the test suite:
+## Usage
+
+Populate a `.env` file with the desired configuration, then run the bot:
+
+```
+python main.py
+```
+
+On start-up the bot fetches account details, loads any persisted positions and
+evaluates the trading universe defined by `SP100_CSV`.
+
+## Development
+
+Run the test suite to validate changes:
 
 ```
 pytest -q
@@ -58,11 +84,9 @@ pytest -q
 
 ## Notes
 
-The bot integrates with real broker APIs and market data providers. By
-default it retrieves market data from Yahoo Finance, while IBKR handles
-account management and order execution. The included `ibkr_client.py`
-demonstrates how to request historical data and submit basic orders while
-respecting their pacing limitations. Upon startup the bot
-logs the current IBKR cash balance, buying power and any open positions
-loaded from the local database.
+The bot integrates with real broker APIs and market data providers.  By default
+it retrieves market data from Yahoo Finance while IBKR handles account
+management and order execution.  The included `ibkr_client.py` demonstrates how
+to request historical data and submit basic orders while respecting IBKR pacing
+limitations.
 

@@ -1,3 +1,11 @@
+"""Centralized configuration and environment settings for the trading bot.
+
+This module loads environment variables from a ``.env`` file and exposes
+constants used throughout the system such as database paths, logging
+locations and market session times.  Only lightweight logic lives here so the
+rest of the codebase can import configuration values without side effects.
+"""
+
 import os
 from datetime import time
 import pytz
