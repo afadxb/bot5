@@ -797,9 +797,21 @@ class TradingBot:
     def _detect_market_regime(self):
         """Detect current market regime"""
         # Fetch SPY data via data provider
-        spy_data = self._fetch_symbol_data('SPY', 250, '1D')
+        try:
+            spy_data = self._fetch_symbol_data('SPY', 250, '1D')
+        except Exception as e:
+            self.logger.warning(f"Unable to fetch SPY data: {e}")
+            return
+
+        if spy_data is None or getattr(spy_data, "empty", False):
+            self.logger.warning("SPY data unavailable; skipping market regime detection")
+            return
+
         vix_value = self._fetch_vix_value(spy_data)
-        
+        if vix_value is None:
+            self.logger.warning("VIX value unavailable; skipping market regime detection")
+            return
+
         self.current_regime = self.regime_detector.detect_regime(spy_data, vix_value)
         self.logger.info(f"Detected market regime: {self.current_regime.value}")
     
@@ -1110,22 +1122,30 @@ class TradingBot:
 
         if timeframe == '4H':
             interval = self._provider_interval('1H')
-            df_1h = self.data_provider.get_historical_data(symbol, interval, periods * 4)
+            needed = periods * 4
+            size = 'full' if needed > 100 else 'compact'
+            df_1h = self.data_provider.get_historical_data(symbol, interval, outputsize=size)
             if df_1h.empty:
                 raise ValueError(f"No data returned for {symbol}")
+            df_1h = df_1h.tail(needed)
             return self.data_rollup.rollup_1h_to_4h(df_1h)
 
         interval = self._provider_interval(timeframe)
-        df = self.data_provider.get_historical_data(symbol, interval, periods)
+        size = 'full' if periods > 100 else 'compact'
+        df = self.data_provider.get_historical_data(symbol, interval, outputsize=size)
         if df.empty:
             raise ValueError(f"No data returned for {symbol}")
-        return df
+        return df.tail(periods)
 
-    def _fetch_vix_value(self, spy_data: pd.DataFrame) -> float:
+    def _fetch_vix_value(self, spy_data: pd.DataFrame | None) -> float | None:
         """
         Return latest VIX quote or fall back to a realized-volatility proxy
         based on SPY ATR percentile.
         """
+        if spy_data is None or getattr(spy_data, "empty", False):
+            self.logger.warning("SPY data unavailable for VIX proxy")
+            return None
+
         vix = None
         if self.data_provider:
             for symbol in ("^VIX", "VIX"):

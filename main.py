@@ -19,7 +19,8 @@ def main():
     try:
         send_alert("Trading bot starting")
         bot = TradingBot()
-        return bot
+        bot.run_hourly()  # Run one full cycle before returning
+        return bot  # Wrap in a scheduler for continuous execution
     except Exception as exc:  # pragma: no cover - integration dependent
         logging.exception("Fatal error starting trading bot")
         send_alert(f"Trading bot error: {exc}")

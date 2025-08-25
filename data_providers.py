@@ -15,8 +15,19 @@ class DataProvider(ABC):
     """Abstract base class for market data providers."""
 
     @abstractmethod
-    def get_historical_data(self, symbol: str, interval: str, outputsize: int) -> pd.DataFrame:
-        """Return historical market data for *symbol*."""
+    def get_historical_data(self, symbol: str, interval: str, outputsize: str) -> pd.DataFrame:
+        """Return historical market data for *symbol*.
+
+        Parameters
+        ----------
+        symbol:
+            Ticker symbol to request.
+        interval:
+            Data interval such as ``"60min"`` or ``"15min"``.
+        outputsize:
+            Either ``"compact"`` (latest 100 points) or ``"full"`` as defined
+            by the Alpha Vantage API documentation.
+        """
 
     @abstractmethod
     def get_quote(self, symbol: str) -> Optional[float]:
@@ -57,12 +68,15 @@ class AlphaVantageDataProvider(DataProvider):
         self.base_url = base_url
         self.logger = logging.getLogger(__name__)
 
-    def get_historical_data(self, symbol: str, interval: str, outputsize: int = 100) -> pd.DataFrame:
+    def get_historical_data(
+        self, symbol: str, interval: str, outputsize: str = "compact"
+    ) -> pd.DataFrame:
+        outputsize = outputsize if outputsize in {"compact", "full"} else "compact"
         params = {
             "function": "TIME_SERIES_INTRADAY",
             "symbol": symbol,
             "interval": interval,
-            "outputsize": "full" if outputsize > 100 else "compact",
+            "outputsize": outputsize,
             "datatype": "json",
             "apikey": self.api_key,
         }
@@ -70,9 +84,20 @@ class AlphaVantageDataProvider(DataProvider):
         try:
             response = requests.get(self.base_url, params=params, timeout=10)
             response.raise_for_status()
-            payload = response.json().get(f"Time Series ({interval})", {})
+            data = response.json()
         except Exception as exc:  # pragma: no cover - network dependent
             self.logger.error("Alpha Vantage request failed: %s", exc)
+            return pd.DataFrame()
+
+        series_key = f"Time Series ({interval})"
+        payload = data.get(series_key)
+        if not payload:
+            note = data.get("Note")
+            error = data.get("Error Message")
+            if note:
+                self.logger.warning("Alpha Vantage notice: %s", note)
+            if error:
+                self.logger.error("Alpha Vantage error: %s", error)
             return pd.DataFrame()
 
         records = []
@@ -105,9 +130,20 @@ class AlphaVantageDataProvider(DataProvider):
         try:
             response = requests.get(self.base_url, params=params, timeout=10)
             response.raise_for_status()
-            data = response.json().get("Global Quote", {})
-            price = data.get("05. price")
-            return float(price) if price is not None else None
+            data = response.json()
         except Exception as exc:  # pragma: no cover - network dependent
             self.logger.error("Alpha Vantage quote request failed: %s", exc)
             return None
+
+        quote = data.get("Global Quote")
+        if not quote:
+            note = data.get("Note")
+            error = data.get("Error Message")
+            if note:
+                self.logger.warning("Alpha Vantage notice: %s", note)
+            if error:
+                self.logger.error("Alpha Vantage error: %s", error)
+            return None
+
+        price = quote.get("05. price")
+        return float(price) if price is not None else None
