@@ -350,12 +350,21 @@ class ScoringEngine:
         
         # Apply regime multipliers
         regime_multipliers = self._get_regime_multipliers(regime)
-        total_score = (
-            trend_score * regime_multipliers['trend'] +
-            momentum_score * regime_multipliers['momentum'] +
-            volume_score * regime_multipliers['volume'] +
-            setup_score * regime_multipliers['setup']
+        weighted_trend = trend_score * regime_multipliers['trend']
+        weighted_momentum = momentum_score * regime_multipliers['momentum']
+        weighted_volume = volume_score * regime_multipliers['volume']
+        weighted_setup = setup_score * regime_multipliers['setup']
+
+        raw_total = weighted_trend + weighted_momentum + weighted_volume + weighted_setup
+
+        # Normalize score back to 0-100 range based on weighted maximum
+        max_total = (
+            45 * regime_multipliers['trend'] +
+            30 * regime_multipliers['momentum'] +
+            15 * regime_multipliers['volume'] +
+            10 * regime_multipliers['setup']
         )
+        total_score = (raw_total / max_total * 100) if max_total else 0
         
         # Apply penalties
         penalties = self._calculate_penalties(daily_data, four_hour_data)
@@ -541,11 +550,18 @@ class ScoringEngine:
         
         # 1H Acceleration/Confirmation
         exit_confirmation = ExitConfirmation()
-        confirmation = exit_confirmation.check_1h_confirmation(symbol, hourly_data)
-        if confirmation['confirmed']:
-            score += 1
-        
-        return score
+        confirmation = {
+            'confirmed': False,
+            'signals_present': [],
+            'timestamp': None,
+            'symbol': symbol
+        }
+        if hourly_data is not None:
+            confirmation = exit_confirmation.check_1h_confirmation(symbol, hourly_data)
+            if confirmation['confirmed']:
+                score += 1
+
+        return score, confirmation
 
 class RegimeDetector:
     def __init__(self):
@@ -559,61 +575,61 @@ class RegimeDetector:
             return MarketRegime.RISK_OFF
         
         # Calculate required indicators
+        spy_data = spy_data.copy()
         spy_data['sma_50'] = Indicators.calculate_sma(spy_data['close'], 50)
         spy_data['sma_200'] = Indicators.calculate_sma(spy_data['close'], 200)
-        
-        # Calculate ADX (simplified)
+
         high, low, close = spy_data['high'], spy_data['low'], spy_data['close']
-        tr = pd.concat([high - low, 
-                       abs(high - close.shift()), 
-                       abs(low - close.shift())], axis=1).max(axis=1)
+        tr1 = high - low
+        tr2 = (high - close.shift()).abs()
+        tr3 = (low - close.shift()).abs()
+        tr = pd.concat([tr1, tr2, tr3], axis=1).max(axis=1)
         atr = tr.rolling(14).mean()
-        
-        plus_dm = high.diff()
-        minus_dm = low.diff().abs()
-        
-        plus_di = 100 * (plus_dm.rolling(14).mean() / atr)
-        minus_di = 100 * (minus_dm.rolling(14).mean() / atr)
-        
-        dx = 100 * (abs(plus_di - minus_di) / (plus_di + minus_di))
+
+        up_move = high.diff()
+        down_move = low.shift() - low
+        plus_dm = up_move.where((up_move > down_move) & (up_move > 0), 0.0)
+        minus_dm = down_move.where((down_move > up_move) & (down_move > 0), 0.0)
+
+        plus_di = 100 * (plus_dm.rolling(14).sum() / atr)
+        minus_di = 100 * (minus_dm.rolling(14).sum() / atr)
+        dx = 100 * (plus_di - minus_di).abs() / (plus_di + minus_di)
         adx = dx.rolling(14).mean()
-        
-        # Get current values
-        current_close = spy_data['close'].iloc[-1]
+
+        current_close = close.iloc[-1]
         current_sma_50 = spy_data['sma_50'].iloc[-1]
         current_sma_200 = spy_data['sma_200'].iloc[-1]
         current_adx = adx.iloc[-1] if not pd.isna(adx.iloc[-1]) else 0
-        
-        # Trending (TR) conditions
+
+        slope_50 = 0
+        sma50 = spy_data['sma_50']
+        if len(sma50) >= 21 and not pd.isna(sma50.iloc[-21]):
+            slope_50 = (sma50.iloc[-1] - sma50.iloc[-21]) / 20 / sma50.iloc[-21]
+
         trending_conditions = (
             current_close > current_sma_50 > current_sma_200 and
             current_adx >= 20 and
             vix_value < 22
         )
-        
-        # Ranging (RG) conditions
+
         ranging_conditions = (
-            abs(current_sma_50 - current_sma_50.shift(20).iloc[-1]) / current_sma_50 < 0.05 and
+            abs(slope_50) < 0.0005 and
             current_adx < 20 and
             18 <= vix_value <= 26
         )
-        
-        # Risk-Off (RO) conditions
+
         risk_off_conditions = (
             current_close < current_sma_200 or
             vix_value >= 26
         )
-        
-        # Determine regime
+
         if trending_conditions:
             return MarketRegime.TRENDING
-        elif ranging_conditions:
-            return MarketRegime.RANGING
-        elif risk_off_conditions:
+        if risk_off_conditions:
             return MarketRegime.RISK_OFF
-        else:
-            # Default to ranging if no clear regime
+        if ranging_conditions:
             return MarketRegime.RANGING
+        return MarketRegime.RANGING
 
 class SentimentAnalyzer:
     def __init__(self):
@@ -670,13 +686,14 @@ class SentimentAnalyzer:
             entry_score += 3
         elif news_sentiment < -0.7:  # Strong negative
             entry_score -= 5
-            # In Risk-Off regime, strong negative news blocks entry
-            if regime == MarketRegime.RISK_OFF:
-                entry_score = 0
-        
+
+        # Risk-off regime gating
+        if regime == MarketRegime.RISK_OFF and (entry_score < 85 or news_sentiment < 0):
+            return 0, {"fg_index": fg_index, "news_sentiment": news_sentiment, "action": "risk_off_block"}
+
         # Ensure score is within bounds
         entry_score = max(0, min(100, entry_score))
-        
+
         return entry_score, {"fg_index": fg_index, "news_sentiment": news_sentiment, "action": "adjusted"}
 
 class TradingBot:
@@ -778,8 +795,8 @@ class TradingBot:
     def _detect_market_regime(self):
         """Detect current market regime"""
         # Fetch SPY data via data provider, falling back to sample data
-        spy_data = self._fetch_symbol_data('SPY', 100, '1D')
-        vix_value = 18.5  # Sample VIX value
+        spy_data = self._fetch_symbol_data('SPY', 250, '1D')
+        vix_value = self._fetch_vix_value(spy_data)
         
         self.current_regime = self.regime_detector.detect_regime(spy_data, vix_value)
         self.logger.info(f"Detected market regime: {self.current_regime.value}")
@@ -893,18 +910,19 @@ class TradingBot:
                 four_hour_data = self._calculate_indicators(four_hour_data)
                 hourly_data = self._calculate_indicators(hourly_data)
                 
-                # Calculate exit score
-                exit_score = self.scoring_engine.calculate_exit_score(
+                # Calculate exit score and 1H confirmation
+                exit_score, confirmation = self.scoring_engine.calculate_exit_score(
                     position.symbol, daily_data, four_hour_data, hourly_data
                 )
-                
+
                 # Update position PnL
                 current_price = four_hour_data['close'].iloc[-1]
                 position.current_pnl = (current_price - position.entry_price) * position.quantity
-                
-                # Apply exit ladder
-                self._apply_exit_ladder(position, exit_score, current_price)
-                
+
+                # Apply exit ladder only when 1H confirmation is present
+                if confirmation.get("confirmed"):
+                    self._apply_exit_ladder(position, exit_score, current_price, daily_data, four_hour_data)
+
                 # Check for trail promotion
                 self._check_trail_promotion(position, daily_data, four_hour_data)
                 
@@ -914,7 +932,7 @@ class TradingBot:
             except Exception as e:
                 self.logger.error(f"Error managing position {position_id}: {e}")
     
-    def _apply_exit_ladder(self, position, exit_score, current_price):
+    def _apply_exit_ladder(self, position, exit_score, current_price, daily_data, four_hour_data):
         """Apply exit ladder based on exit score"""
         if exit_score >= 9:
             # Exit 100%
@@ -924,14 +942,17 @@ class TradingBot:
             # Scale out to 75% total
             self._scale_out_position(position, 0.75, current_price, "exit_score_7")
             position.status = PositionStatus.SCALE_OUT_75
+            self._ratchet_stop(position, daily_data, four_hour_data)
         elif exit_score >= 5 and position.status not in [PositionStatus.SCALE_OUT_50, PositionStatus.SCALE_OUT_75]:
             # Scale out to 50% total
             self._scale_out_position(position, 0.50, current_price, "exit_score_5")
             position.status = PositionStatus.SCALE_OUT_50
+            self._ratchet_stop(position, daily_data, four_hour_data)
         elif exit_score >= 3 and position.status not in [PositionStatus.SCALE_OUT_25, PositionStatus.SCALE_OUT_50, PositionStatus.SCALE_OUT_75]:
             # Scale out 25%
             self._scale_out_position(position, 0.25, current_price, "exit_score_3")
             position.status = PositionStatus.SCALE_OUT_25
+            self._ratchet_stop(position, daily_data, four_hour_data)
     
     def _scale_out_position(self, position, scale_percent, current_price, reason):
         """Scale out of a position"""
@@ -956,9 +977,9 @@ class TradingBot:
         # Update position
         position.quantity -= shares_to_sell
         position.realized_pnl += (current_price - position.entry_price) * shares_to_sell
-        
+
         self.logger.info(f"Scaled out {scale_percent*100}% of {position.symbol}: {shares_to_sell} shares at {current_price}")
-    
+
     def _exit_position(self, position, current_price, reason):
         """Fully exit a position"""
         order_id = f"EX_{position.symbol}_{datetime.now().timestamp()}"
@@ -981,8 +1002,19 @@ class TradingBot:
         position.quantity = 0
         position.exit_price = current_price
         position.exit_time = datetime.now(EASTERN_TZ)
-        
+
         self.logger.info(f"Exited {position.symbol}: {position.quantity} shares at {current_price}")
+
+    def _ratchet_stop(self, position, daily_data, four_hour_data):
+        """Adjust the protective stop according to the ratchet rules."""
+        ema20 = daily_data.get("ema_20", pd.Series()).iloc[-1] if "ema_20" in daily_data else position.entry_price
+        atr = daily_data.get("atr_14", pd.Series()).iloc[-1] if "atr_14" in daily_data else 0
+        chandelier = position.entry_price
+        if len(four_hour_data) >= 22 and atr > 0:
+            chandelier = four_hour_data["high"].rolling(22).max().iloc[-1] - 3 * atr
+
+        new_stop = max(position.entry_price, ema20 - atr, chandelier)
+        self.order_manager.adjust_stop_loss(position.position_id, new_stop, position.quantity)
     
     def _check_trail_promotion(self, position, daily_data, four_hour_data):
         """Check if position should be promoted to trailing stop"""
@@ -995,27 +1027,37 @@ class TradingBot:
         
         if current_price >= pt1_price:
             # Check exit score and daily trend
-            exit_score = self.scoring_engine.calculate_exit_score(
+            exit_score, _ = self.scoring_engine.calculate_exit_score(
                 position.symbol, daily_data, four_hour_data, None
             )
-            
+
             # Check if daily trend is still bullish
             daily_trend_bullish = (
-                'supertrend_direction' in daily_data and 
+                'supertrend_direction' in daily_data and
                 daily_data['supertrend_direction'].iloc[-1] == 'bullish'
             )
-            
+
             if exit_score <= 2 and daily_trend_bullish:
                 # Promote to trailing stop
                 atr = daily_data['atr_14'].iloc[-1]
                 trail_amount = 2.5 * atr
-                
+
                 success = self.order_manager.promote_to_trailing_stop(
                     position.position_id, trail_amount
                 )
-                
+
                 if success:
                     self.logger.info(f"Promoted {position.symbol} to trailing stop: {trail_amount}")
+
+        # Upgrade trail to chandelier on sustained strength
+        has_trail = any(
+            self.order_manager.orders[oid].order_type == OrderType.TRAIL
+            for oid in self.order_manager.position_orders.get(position.position_id, [])
+            if oid in self.order_manager.orders
+        )
+        if has_trail and current_price >= position.entry_price + 2 * position.risk_per_share:
+            atr = daily_data['atr_14'].iloc[-1]
+            self.order_manager.upgrade_trailing_stop(position.position_id, 3 * atr)
     
     def _calculate_indicators(self, data):
         """Calculate technical indicators for data"""
@@ -1073,6 +1115,38 @@ class TradingBot:
                 if not df.empty:
                     return df
         return self._get_sample_data(symbol, sample_periods, timeframe)
+
+    def _fetch_vix_value(self, spy_data: pd.DataFrame) -> float:
+        """
+        Return latest VIX quote or fall back to a realized-volatility proxy
+        based on SPY ATR percentile.
+        """
+        vix = None
+        if self.data_provider:
+            for symbol in ("^VIX", "VIX"):
+                try:  # pragma: no cover - network dependent
+                    vix = self.data_provider.get_quote(symbol)
+                except Exception:  # pragma: no cover - network dependent
+                    vix = None
+                if vix is not None:
+                    return vix
+
+        # Fallback: approximate VIX using SPY ATR percentile
+        self.logger.warning(
+            "Failed to fetch VIX; using SPY ATR percentile as proxy"
+        )
+        atr = Indicators.calculate_atr(
+            spy_data["high"], spy_data["low"], spy_data["close"], 14
+        )
+        atr_pct = (atr / spy_data["close"]) * 100
+        atr_pct = atr_pct.dropna()
+        if len(atr_pct) >= 20:
+            percentile = atr_pct.rank(pct=True).iloc[-1]
+        else:
+            percentile = 0.5
+        # Map percentile to an approximate VIX range (12-40)
+        vix_proxy = 12 + percentile * 28
+        return float(vix_proxy)
 
     def _provider_interval(self, timeframe: str) -> str:
         mapping = {"1H": "60min", "1D": "daily"}

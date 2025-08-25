@@ -167,3 +167,76 @@ class OrderManager:
             self.logger.error(f"Failed to cancel order {order_id}: {e}")
             return False
 
+    def adjust_stop_loss(self, position_id: str, new_stop: float, quantity: int | None = None) -> bool:
+        """Ratchet the existing stop loss to *new_stop*.
+
+        The current stop order is cancelled and replaced with a new one at the
+        requested price.  Returns ``True`` when a stop order was updated.
+        """
+        position_orders = self.position_orders.get(position_id, [])
+
+        # Locate existing stop order
+        stop_order_id = None
+        for oid in position_orders:
+            order = self.orders.get(oid)
+            if order and order.order_type == OrderType.STP:
+                stop_order_id = oid
+                break
+
+        if not stop_order_id:
+            self.logger.warning(f"No stop order found for position {position_id}")
+            return False
+
+        # Cancel the old stop
+        if not self.cancel_order(stop_order_id):
+            return False
+        position_orders.remove(stop_order_id)
+        self.position_orders[position_id] = position_orders
+
+        original_order = self.orders[position_orders[0]]  # entry order
+        qty = quantity if quantity is not None else (
+            original_order.quantity - original_order.filled_quantity
+        )
+        new_id = f"{original_order.symbol}_{datetime.now().timestamp()}_STOP"
+        stop_order = Order(
+            order_id=new_id,
+            symbol=original_order.symbol,
+            order_type=OrderType.STP,
+            side="SELL",
+            quantity=qty,
+            stop_price=new_stop,
+            parent_order_id=position_id,
+            status=OrderStatus.PENDING_NEW,
+        )
+
+        self.orders[new_id] = stop_order
+        self.position_orders[position_id].append(new_id)
+        self.data_manager.save_order(stop_order)
+        if self.broker:
+            self.broker.place_order(stop_order)
+
+        self.logger.info(
+            f"Stop loss adjusted for {original_order.symbol} to {new_stop}"
+        )
+        return True
+
+    def upgrade_trailing_stop(self, position_id: str, new_trail: float) -> bool:
+        """Upgrade an existing trailing stop to ``new_trail`` amount."""
+        position_orders = self.position_orders.get(position_id, [])
+        for oid in position_orders:
+            order = self.orders.get(oid)
+            if order and order.order_type == OrderType.TRAIL:
+                order.trail_amount = new_trail
+                self.data_manager.save_order(order)
+                if self.broker:
+                    self.broker.place_order(order)
+                self.logger.info(
+                    f"Trailing stop for {order.symbol} upgraded to {new_trail}"
+                )
+                return True
+
+        self.logger.warning(
+            f"No trailing stop order found to upgrade for position {position_id}"
+        )
+        return False
+
