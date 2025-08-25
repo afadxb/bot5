@@ -15,7 +15,7 @@ from models import (MarketRegime, Order, OrderStatus, OrderType,
                     Position, PositionStatus)
 from data_access import DataManager
 from order_management import OrderManager
-from ibkr_client import IBKRClient, stock_contract
+from ibkr_client import IBKRClient
 from data_providers import AlphaVantageDataProvider
 from brokers import IBKRBroker
 
@@ -707,8 +707,10 @@ class TradingBot:
             self.data_provider = AlphaVantageDataProvider(ALPHAVANTAGE_API_KEY)
 
         self.order_manager = OrderManager(self.data_manager, broker=self.broker)
+        # Load any persisted positions and display account state
+        self.positions = self.data_manager.load_positions()
+        self._print_account_status()
 
-        self.positions = {}
         self.universe = self._load_sp100_universe()
         self.current_regime = MarketRegime.RISK_OFF
 
@@ -720,6 +722,30 @@ class TradingBot:
         # In a real implementation, this would load from a CSV or API
         # For demo purposes, we'll use a small subset
         return ['AAPL', 'MSFT', 'GOOGL', 'AMZN', 'META', 'TSLA', 'NVDA', 'JPM', 'JNJ', 'V']
+
+    def _print_account_status(self):
+        """Log current account balance and any open positions."""
+        if self.ibkr:
+            try:
+                summary = self.ibkr.get_account_summary()
+                cash = summary.get("cash")
+                self.logger.info(f"Account balance: {cash}")
+            except Exception as e:  # pragma: no cover - network dependent
+                self.logger.warning(f"Unable to fetch account balance: {e}")
+        else:
+            self.logger.info("Account balance unavailable: IBKR client not connected")
+
+        open_positions = [
+            p for p in self.positions.values()
+            if p.status != PositionStatus.EXITED
+        ]
+        if open_positions:
+            for pos in open_positions:
+                self.logger.info(
+                    f"Position {pos.symbol}: qty={pos.quantity} entry={pos.entry_price}"
+                )
+        else:
+            self.logger.info("No open positions loaded")
     
     def run_hourly(self):
         """Main hourly execution loop"""
@@ -748,8 +774,8 @@ class TradingBot:
     
     def _detect_market_regime(self):
         """Detect current market regime"""
-        # Fetch SPY data via IBKR, falling back to sample data
-        spy_data = self._fetch_symbol_data('SPY', '6 M', '1 day', 100, '1D')
+        # Fetch SPY data via data provider, falling back to sample data
+        spy_data = self._fetch_symbol_data('SPY', 100, '1D')
         vix_value = 18.5  # Sample VIX value
         
         self.current_regime = self.regime_detector.detect_regime(spy_data, vix_value)
@@ -758,8 +784,8 @@ class TradingBot:
     def _process_symbol(self, symbol):
         """Process a single symbol for potential entry"""
         # Get historical data for symbol
-        daily_data = self._fetch_symbol_data(symbol, '6 M', '1 day', 100, '1D')
-        hourly_data = self._fetch_symbol_data(symbol, '1 M', '1 hour', 50, '1H')
+        daily_data = self._fetch_symbol_data(symbol, 100, '1D')
+        hourly_data = self._fetch_symbol_data(symbol, 50, '1H')
         
         # Roll up 1H to 4H data
         four_hour_data = self.data_rollup.rollup_1h_to_4h(hourly_data)
@@ -855,9 +881,9 @@ class TradingBot:
                 
             try:
                 # Get current data
-                daily_data = self._fetch_symbol_data(position.symbol, '6 M', '1 day', 100, '1D')
-                four_hour_data = self._fetch_symbol_data(position.symbol, '1 M', '4 hours', 50, '4H')
-                hourly_data = self._fetch_symbol_data(position.symbol, '1 M', '1 hour', 24, '1H')
+                daily_data = self._fetch_symbol_data(position.symbol, 100, '1D')
+                four_hour_data = self._fetch_symbol_data(position.symbol, 50, '4H')
+                hourly_data = self._fetch_symbol_data(position.symbol, 24, '1H')
                 
                 # Calculate indicators
                 daily_data = self._calculate_indicators(daily_data)
@@ -1030,26 +1056,23 @@ class TradingBot:
 
         return data
 
-    def _fetch_symbol_data(self, symbol: str, duration: str, bar_size: str,
-                           sample_periods: int, timeframe: str) -> pd.DataFrame:
-        """Fetch data from IBKR or fall back to generated samples."""
-        if self.ibkr:
-            try:
-                contract = stock_contract(symbol)
-                df = self.ibkr.request_historical_data(contract, duration, bar_size)
+    def _fetch_symbol_data(self, symbol: str, sample_periods: int, timeframe: str) -> pd.DataFrame:
+        """Fetch data from Alpha Vantage or fall back to generated samples."""
+        if self.data_provider:
+            if timeframe == '4H':
+                interval = self._provider_interval('1H')
+                df_1h = self.data_provider.get_historical_data(symbol, interval, sample_periods * 4)
+                if not df_1h.empty:
+                    return self.data_rollup.rollup_1h_to_4h(df_1h)
+            else:
+                interval = self._provider_interval(timeframe)
+                df = self.data_provider.get_historical_data(symbol, interval, sample_periods)
                 if not df.empty:
                     return df
-            except Exception as exc:  # pragma: no cover - network dependent
-                self.logger.warning(f"IBKR data fetch failed for {symbol}: {exc}")
-        if self.data_provider:
-            interval = self._provider_interval(timeframe)
-            df = self.data_provider.get_historical_data(symbol, interval, sample_periods)
-            if not df.empty:
-                return df
         return self._get_sample_data(symbol, sample_periods, timeframe)
 
     def _provider_interval(self, timeframe: str) -> str:
-        mapping = {"1H": "60min", "4H": "240min", "1D": "daily"}
+        mapping = {"1H": "60min", "1D": "daily"}
         return mapping.get(timeframe, "60min")
 
     def _get_sample_data(self, symbol, periods, timeframe='1D'):

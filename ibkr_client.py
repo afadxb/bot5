@@ -142,6 +142,18 @@ class IBKRClient(EWrapper, EClient):
             df.set_index("date", inplace=True)
         return df
 
+    # ------------------------------------------------------------------
+    # Account information
+    # ------------------------------------------------------------------
+    def get_account_summary(self) -> dict:  # pragma: no cover - network dependent
+        """Retrieve basic account summary such as cash balance.
+
+        This simplified implementation returns a static placeholder. A real
+        version would call ``reqAccountSummary`` and parse the response from the
+        IBKR API.
+        """
+        return {"cash": 0.0}
+
 
 def stock_contract(symbol: str) -> Contract:
     """Create a SMART-routed US stock contract."""
