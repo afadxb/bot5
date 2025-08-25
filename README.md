@@ -54,8 +54,12 @@ pytest -q
 
 The strategy logic and data handling routines are illustrative. In a real
 trading environment these modules integrate with broker APIs and data
-providers. The included `ibkr_client.py` demonstrates how to request
-historical data from Interactive Brokers while respecting their pacing
-limitations, following their [TWS API notes and limitations](https://www.interactivebrokers.com/campus/ibkr-api-page/twsapi-doc/#notes-and-limitations).
+providers. By default the bot retrieves market data from the Alpha Vantage
+API, while IBKR is used only for account management and order execution. The
+included `ibkr_client.py` demonstrates how to request historical data from
+Interactive Brokers while respecting their pacing limitations, following their [TWS API notes and limitations](https://www.interactivebrokers.com/campus/ibkr-api-page/twsapi-doc/#notes-and-limitations).
 It mirrors the approach shown in the
 "[Using technical indicators with TWS API](https://www.interactivebrokers.com/campus/ibkr-quant-news/using-technical-indicators-with-tws-api/)" article.
+Upon startup the bot logs the current IBKR cash balance and any open
+positions loaded from the local database, providing immediate context for
+subsequent trading decisions.
