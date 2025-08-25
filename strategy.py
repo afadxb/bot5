@@ -728,8 +728,11 @@ class TradingBot:
         if self.ibkr:
             try:
                 summary = self.ibkr.get_account_summary()
-                cash = summary.get("cash")
-                self.logger.info(f"Account balance: {cash}")
+                cash = summary.get("TotalCashValue")
+                buying_power = summary.get("BuyingPower")
+                self.logger.info(
+                    f"Account cash: {cash}, buying power: {buying_power}"
+                )
             except Exception as e:  # pragma: no cover - network dependent
                 self.logger.warning(f"Unable to fetch account balance: {e}")
         else:

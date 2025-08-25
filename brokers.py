@@ -5,8 +5,8 @@ from __future__ import annotations
 import logging
 from abc import ABC, abstractmethod
 
-from models import Order
-from ibkr_client import IBKRClient
+from models import Order, OrderType
+from ibkr_client import IBKRClient, IBOrder, stock_contract
 
 
 class BrokerAPI(ABC):
@@ -35,11 +35,27 @@ class IBKRBroker(BrokerAPI):
         self.logger = logging.getLogger(__name__)
 
     def place_order(self, order: Order) -> str:  # pragma: no cover - network dependent
+        contract = stock_contract(order.symbol)
+        ib_order = IBOrder()
+        ib_order.action = order.side
+        ib_order.totalQuantity = order.quantity
+        if order.order_type == OrderType.LMT:
+            ib_order.orderType = "LMT"
+            ib_order.lmtPrice = order.limit_price or 0.0
+        elif order.order_type == OrderType.STP:
+            ib_order.orderType = "STP"
+            ib_order.auxPrice = order.stop_price or 0.0
+        elif order.order_type == OrderType.TRAIL:
+            ib_order.orderType = "TRAIL"
+            ib_order.trailingPercent = order.trail_amount or 0.0
         self.logger.info("Submitting %s to IBKR", order.order_id)
-        # A real implementation would call ``self.client.placeOrder`` here.
-        return order.order_id
+        order_id = self.client.place_order(contract, ib_order)
+        return str(order_id)
 
     def cancel_order(self, order_id: str) -> bool:  # pragma: no cover - network dependent
         self.logger.info("Cancelling order %s", order_id)
-        # A real implementation would call ``self.client.cancelOrder`` here.
-        return True
+        try:
+            self.client.cancel_order(int(order_id))
+            return True
+        except Exception:
+            return False
