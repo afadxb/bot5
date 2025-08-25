@@ -1,3 +1,11 @@
+"""Persistence layer for orders, positions and analytics data.
+
+The :class:`DataManager` encapsulates all SQLite database interactions,
+providing simple methods to store and retrieve the bot's state.  Keeping the
+SQL logic in a dedicated module makes it easier to swap out the underlying
+storage backend in the future.
+"""
+
 import json
 import logging
 import sqlite3
@@ -9,6 +17,8 @@ from config import DB_PATH
 
 
 class DataManager:
+    """Thin wrapper around SQLite for persisting bot state."""
+
     def __init__(self, db_path: str = DB_PATH):
         self.db_path = db_path
         self._init_db()

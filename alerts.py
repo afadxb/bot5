@@ -1,3 +1,5 @@
+"""Utility helpers for sending notifications to external services."""
+
 import logging
 
 import requests

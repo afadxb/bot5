@@ -1,3 +1,5 @@
+"""Executable entry point for running the trading bot locally."""
+
 import logging
 
 from alerts import send_alert

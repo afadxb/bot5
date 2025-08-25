@@ -1,3 +1,5 @@
+"""Trading strategy implementation and supporting analytics utilities."""
+
 import logging
 import csv
 import os
@@ -20,7 +22,10 @@ from ibkr_client import IBKRClient
 from data_providers import YahooDataProvider
 from brokers import IBKRBroker
 
+
 class Indicators:
+    """Collection of technical indicator calculation helpers."""
+
     @staticmethod
     def calculate_sma(data: pd.Series, window: int) -> pd.Series:
         return data.rolling(window=window).mean()
@@ -101,6 +106,8 @@ class Indicators:
         return obv
 
 class DataRollUp:
+    """Utilities for aggregating hourly bars into 4H session-aligned bars."""
+
     def __init__(self):
         self.valid_4h_start_times = FOUR_HOUR_TIMES
         
@@ -160,6 +167,8 @@ class DataRollUp:
         }
 
 class SupportLevelAnalyzer:
+    """Determine the nearest technical support level for a symbol."""
+
     def __init__(self):
         self.support_priority = [
             'validated_trendline',
@@ -273,6 +282,8 @@ class SupportLevelAnalyzer:
                 support_info['distance_pct'] <= max_distance_pct)
 
 class ExitConfirmation:
+    """Verify that multiple indicators agree before exiting a trade."""
+
     def __init__(self):
         self.required_signals = ['supertrend_bearish', 'macd_bear_cross']
     
@@ -324,6 +335,8 @@ class ExitConfirmation:
                 candle.get('macd_line', 0) < candle.get('macd_signal', 0))
 
 class ScoringEngine:
+    """Combine indicator readings into aggregate entry and exit scores."""
+
     def __init__(self):
         self.logger = logging.getLogger(f"{__name__}.ScoringEngine")
     
@@ -565,6 +578,8 @@ class ScoringEngine:
         return score, confirmation
 
 class RegimeDetector:
+    """Infer the prevailing market regime using SPY and VIX data."""
+
     def __init__(self):
         self.logger = logging.getLogger(f"{__name__}.RegimeDetector")
     
@@ -633,6 +648,8 @@ class RegimeDetector:
         return MarketRegime.RANGING
 
 class SentimentAnalyzer:
+    """Fetch external sentiment metrics to gate trading signals."""
+
     def __init__(self):
         self.logger = logging.getLogger(f"{__name__}.SentimentAnalyzer")
     
@@ -698,6 +715,8 @@ class SentimentAnalyzer:
         return entry_score, {"fg_index": fg_index, "news_sentiment": news_sentiment, "action": "adjusted"}
 
 class TradingBot:
+    """High-level orchestrator coordinating data, scoring and orders."""
+
     def __init__(self, broker: IBKRBroker | None = None, data_provider: YahooDataProvider | None = None):
         self.logger = logging.getLogger(f"{__name__}.TradingBot")
 

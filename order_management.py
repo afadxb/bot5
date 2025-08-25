@@ -1,3 +1,5 @@
+"""High-level routines for creating and managing trading orders."""
+
 import logging
 from datetime import datetime
 from typing import Dict, List
@@ -5,7 +7,10 @@ from typing import Dict, List
 from models import Order, OrderType, OrderStatus
 from brokers import BrokerAPI
 
+
 class OrderManager:
+    """Orchestrates order submission and modification logic."""
+
     def __init__(self, data_manager, broker: BrokerAPI | None = None):
         self.orders: Dict[str, Order] = {}
         self.position_orders: Dict[str, List[str]] = {}
