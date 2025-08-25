@@ -31,6 +31,10 @@ The project is intentionally split into small modules to keep concerns isolated:
 | `alerts.py` | Convenience wrapper for Pushover notifications |
 | `main.py` | Command line entry point to run the bot |
 
+## Architecture
+
+For a high-level view of how these components interact, see [docs/architecture.md](docs/architecture.md).
+
 ## Configuration
 
 Runtime configuration is supplied through a `.env` file located in the project
