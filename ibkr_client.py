@@ -6,7 +6,7 @@ making one blocking request at a time. While minimal, the implementation is
 geared for production use with a real IBKR Gateway/TWS connection and can
 retrieve historical prices, account summaries and open positions, as well as
 submit or cancel basic orders.
-
+"""
 
 from __future__ import annotations
 
