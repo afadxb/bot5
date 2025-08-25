@@ -1,8 +1,9 @@
-"""Lightweight IBKR client for requesting historical data and indicators.
+"""Lightweight IBKR client for requesting historical and account data.
 
 This module follows Interactive Brokers' TWS API notes and limitations by
-making one blocking historical data request at a time. It is inspired by the
-official "Using technical indicators with TWS API" example.
+making one blocking request at a time.  While minimal, the implementation is
+geared for production use with a real IBKR Gateway/TWS connection and can
+retrieve both historical price information and basic account summaries.
 """
 
 from __future__ import annotations
@@ -42,6 +43,8 @@ except Exception:  # pragma: no cover - allow compilation without ibapi
         disconnect = _raise
         connect = _raise
         reqHistoricalData = _raise
+        reqAccountSummary = _raise
+        cancelAccountSummary = _raise
         run = _raise
 
     class EWrapper:  # type: ignore
@@ -92,6 +95,8 @@ class IBKRClient(EWrapper, EClient):
         self.client_id = client_id
         self._historical: List[List] = []
         self._finished = threading.Event()
+        self._account_summary: dict[str, str] = {}
+        self._summary_done = threading.Event()
 
     # ------------------------------------------------------------------
     # Connection management
@@ -115,7 +120,14 @@ class IBKRClient(EWrapper, EClient):
     def historicalDataEnd(self, reqId: int, start: str, end: str) -> None:  # pragma: no cover
         self._finished.set()
 
-    def request_historical_data(self, contract: Contract, duration: str = "2 M", bar_size: str = "1 hour") -> pd.DataFrame:
+    def request_historical_data(
+        self,
+        contract: Contract,
+        duration: str = "2 M",
+        bar_size: str = "1 hour",
+        what_to_show: str = "TRADES",
+        use_rth: bool = True,
+    ) -> pd.DataFrame:
         """Request historical bars and return them as a :class:`pandas.DataFrame`."""
 
         self._historical.clear()
@@ -128,8 +140,8 @@ class IBKRClient(EWrapper, EClient):
             endDateTime="",
             durationStr=duration,
             barSizeSetting=bar_size,
-            whatToShow="TRADES",
-            useRTH=1,
+            whatToShow=what_to_show,
+            useRTH=1 if use_rth else 0,
             formatDate=1,
             keepUpToDate=False,
             chartOptions=[],
@@ -145,14 +157,23 @@ class IBKRClient(EWrapper, EClient):
     # ------------------------------------------------------------------
     # Account information
     # ------------------------------------------------------------------
-    def get_account_summary(self) -> dict:  # pragma: no cover - network dependent
-        """Retrieve basic account summary such as cash balance.
+    def accountSummary(self, reqId: int, account: str, tag: str, value: str, currency: str) -> None:  # pragma: no cover
+        self._account_summary[tag] = value
 
-        This simplified implementation returns a static placeholder. A real
-        version would call ``reqAccountSummary`` and parse the response from the
-        IBKR API.
-        """
-        return {"cash": 0.0}
+    def accountSummaryEnd(self, reqId: int) -> None:  # pragma: no cover
+        self._summary_done.set()
+
+    def get_account_summary(self) -> dict:  # pragma: no cover - network dependent
+        """Retrieve basic account summary such as cash balance."""
+
+        self._account_summary.clear()
+        self._summary_done.clear()
+
+        # Request a couple of common fields. Users can extend this as needed.
+        self.reqAccountSummary(1, "All", "TotalCashValue,BuyingPower")
+        self._summary_done.wait()
+        self.cancelAccountSummary(1)
+        return dict(self._account_summary)
 
 
 def stock_contract(symbol: str) -> Contract:
