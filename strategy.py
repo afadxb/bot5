@@ -1,4 +1,6 @@
 import logging
+import csv
+import os
 import numpy as np
 import pandas as pd
 import schedule
@@ -730,15 +732,15 @@ class TradingBot:
 
         self.universe = self._load_sp100_universe()
         self.current_regime = MarketRegime.RISK_OFF
-
-        # For simulation purposes - in real implementation, this would be from a data provider
-        self.market_data = {}
     
     def _load_sp100_universe(self):
-        """Load S&P 100 universe"""
-        # In a real implementation, this would load from a CSV or API
-        # For demo purposes, we'll use a small subset
-        return ['AAPL', 'MSFT', 'GOOGL', 'AMZN', 'META', 'TSLA', 'NVDA', 'JPM', 'JNJ', 'V']
+        """Load the S&P 100 universe from a CSV file specified by `SP100_CSV`."""
+        csv_path = os.environ.get("SP100_CSV")
+        if not csv_path or not os.path.exists(csv_path):
+            raise RuntimeError("SP100_CSV environment variable must point to constituent CSV")
+        with open(csv_path, newline="") as f:
+            reader = csv.DictReader(f)
+            return [row["Symbol"].strip() for row in reader if row.get("Symbol")]
 
     def _print_account_status(self):
         """Log current account balance and any open positions."""
@@ -794,7 +796,7 @@ class TradingBot:
     
     def _detect_market_regime(self):
         """Detect current market regime"""
-        # Fetch SPY data via data provider, falling back to sample data
+        # Fetch SPY data via data provider
         spy_data = self._fetch_symbol_data('SPY', 250, '1D')
         vix_value = self._fetch_vix_value(spy_data)
         
@@ -1101,20 +1103,23 @@ class TradingBot:
 
         return data
 
-    def _fetch_symbol_data(self, symbol: str, sample_periods: int, timeframe: str) -> pd.DataFrame:
-        """Fetch data from Alpha Vantage or fall back to generated samples."""
-        if self.data_provider:
-            if timeframe == '4H':
-                interval = self._provider_interval('1H')
-                df_1h = self.data_provider.get_historical_data(symbol, interval, sample_periods * 4)
-                if not df_1h.empty:
-                    return self.data_rollup.rollup_1h_to_4h(df_1h)
-            else:
-                interval = self._provider_interval(timeframe)
-                df = self.data_provider.get_historical_data(symbol, interval, sample_periods)
-                if not df.empty:
-                    return df
-        return self._get_sample_data(symbol, sample_periods, timeframe)
+    def _fetch_symbol_data(self, symbol: str, periods: int, timeframe: str) -> pd.DataFrame:
+        """Fetch market data from the configured provider."""
+        if not self.data_provider:
+            raise RuntimeError("No data provider configured")
+
+        if timeframe == '4H':
+            interval = self._provider_interval('1H')
+            df_1h = self.data_provider.get_historical_data(symbol, interval, periods * 4)
+            if df_1h.empty:
+                raise ValueError(f"No data returned for {symbol}")
+            return self.data_rollup.rollup_1h_to_4h(df_1h)
+
+        interval = self._provider_interval(timeframe)
+        df = self.data_provider.get_historical_data(symbol, interval, periods)
+        if df.empty:
+            raise ValueError(f"No data returned for {symbol}")
+        return df
 
     def _fetch_vix_value(self, spy_data: pd.DataFrame) -> float:
         """
@@ -1152,11 +1157,3 @@ class TradingBot:
         mapping = {"1H": "60min", "1D": "daily"}
         return mapping.get(timeframe, "60min")
 
-    def _get_sample_data(self, symbol, periods, timeframe='1D'):
-        """
-        Generate sample data for demonstration
-        In a real implementation, this would fetch from a data provider
-        """
-        if symbol not in self.market_data:
-            # Create sample data
-            np.random.seed(hash(symbol) % 1000) 
