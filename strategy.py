@@ -11,14 +11,13 @@ import json
 import requests
 from typing import Dict, List, Optional, Tuple
 
-from config import (ALPHAVANTAGE_API_KEY, EASTERN_TZ, MARKET_OPEN, MARKET_CLOSE,
-                    FOUR_HOUR_TIMES)
+from config import (EASTERN_TZ, MARKET_OPEN, MARKET_CLOSE, FOUR_HOUR_TIMES)
 from models import (MarketRegime, Order, OrderStatus, OrderType,
                     Position, PositionStatus)
 from data_access import DataManager
 from order_management import OrderManager
 from ibkr_client import IBKRClient
-from data_providers import AlphaVantageDataProvider
+from data_providers import YahooDataProvider
 from brokers import IBKRBroker
 
 class Indicators:
@@ -699,7 +698,7 @@ class SentimentAnalyzer:
         return entry_score, {"fg_index": fg_index, "news_sentiment": news_sentiment, "action": "adjusted"}
 
 class TradingBot:
-    def __init__(self, broker: IBKRBroker | None = None, data_provider: AlphaVantageDataProvider | None = None):
+    def __init__(self, broker: IBKRBroker | None = None, data_provider: YahooDataProvider | None = None):
         self.logger = logging.getLogger(f"{__name__}.TradingBot")
 
         self.data_manager = DataManager()
@@ -722,8 +721,8 @@ class TradingBot:
             self.logger.warning(f"IBKR client unavailable: {e}")
             self.ibkr = None
 
-        if self.data_provider is None and ALPHAVANTAGE_API_KEY:
-            self.data_provider = AlphaVantageDataProvider(ALPHAVANTAGE_API_KEY)
+        if self.data_provider is None:
+            self.data_provider = YahooDataProvider()
 
         self.order_manager = OrderManager(self.data_manager, broker=self.broker)
         # Load any persisted positions and display account state

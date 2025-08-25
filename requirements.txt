@@ -4,3 +4,4 @@ pytz
 python-dotenv
 schedule
 requests
+yfinance

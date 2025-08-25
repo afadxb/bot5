@@ -19,7 +19,6 @@ IBKR_PORT = int(os.getenv('IBKR_PORT', '7496'))
 IBKR_CLIENT_ID = int(os.getenv('IBKR_CLIENT_ID', '1'))
 OPERATING_SYSTEM = os.getenv('OPERATING_SYSTEM', 'windows')
 PYTHON_VERSION = os.getenv('PYTHON_VERSION', '3.12')
-ALPHAVANTAGE_API_KEY = os.getenv('ALPHAVANTAGE_API_KEY')
 PUSHOVER_USER = os.getenv('PUSHOVER_USER')
 PUSHOVER_TOKEN = os.getenv('PUSHOVER_TOKEN')
 DEBUG = os.getenv('DEBUG', '0') == '1'
