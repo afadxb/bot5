@@ -12,7 +12,8 @@ Windows environment running Python 3.12.
 - `data_access.py` – database layer for persisting orders and positions.
 - `order_management.py` – routines for placing and managing orders.
 - `brokers.py` – lightweight abstractions for broker integrations.
-- `data_providers.py` – pluggable market data provider interfaces.
+- `data_providers.py` – pluggable market data provider interfaces, including
+  real-time streaming via the Alpha Vantage API.
 - `strategy.py` – trading strategy, indicators and bot orchestration.
 - `main.py` – entry point that wires everything together.
 
@@ -30,11 +31,17 @@ IBKR_CLIENT_ID=1
 OPERATING_SYSTEM=windows
 PYTHON_VERSION=3.12
 ALPHAVANTAGE_API_KEY=
+PUSHOVER_USER=
+PUSHOVER_TOKEN=
+DEBUG=0
 ```
 
 `ALPHAVANTAGE_API_KEY` is optional and enables the included Alpha Vantage
-data provider. Additional variables can be added as needed. Defaults are
-provided when the variables are absent.
+data provider. When supplied the bot can fetch both historical and
+real-time quote data. `PUSHOVER_USER` and `PUSHOVER_TOKEN` enable optional
+push notifications via the [Pushover](https://pushover.net/) service. Set
+`DEBUG` to ``1`` for verbose logging. Additional variables can be added as
+needed. Defaults are provided when the variables are absent.
 
 ## Development
 
