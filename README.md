@@ -25,7 +25,7 @@ parameters are supported:
 DB_PATH=trading_bot.db
 LOG_FILE=trading_bot.log
 IBKR_HOST=127.0.0.1
-IBKR_PORT=7497
+IBKR_PORT=7496
 IBKR_CLIENT_ID=1
 OPERATING_SYSTEM=windows
 PYTHON_VERSION=3.12
@@ -60,6 +60,6 @@ included `ibkr_client.py` demonstrates how to request historical data from
 Interactive Brokers while respecting their pacing limitations, following their [TWS API notes and limitations](https://www.interactivebrokers.com/campus/ibkr-api-page/twsapi-doc/#notes-and-limitations).
 It mirrors the approach shown in the
 "[Using technical indicators with TWS API](https://www.interactivebrokers.com/campus/ibkr-quant-news/using-technical-indicators-with-tws-api/)" article.
-Upon startup the bot logs the current IBKR cash balance and any open
-positions loaded from the local database, providing immediate context for
-subsequent trading decisions.
+Upon startup the bot logs the current IBKR cash balance and buying power
+alongside any open positions loaded from the local database, providing
+immediate context for subsequent trading decisions.
