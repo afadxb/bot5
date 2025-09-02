@@ -88,7 +88,7 @@ except Exception:  # pragma: no cover - allow compilation without ibapi
 
         action: str = "BUY"
         orderType: str = "MKT"
-        totalQuantity: float = 0
+        totalQuantity: int = 0
         lmtPrice: float = 0.0
         auxPrice: float = 0.0
         trailingPercent: float = 0.0
@@ -254,6 +254,16 @@ def stock_contract(symbol: str) -> Contract:
     contract.symbol = symbol
     contract.secType = "STK"
     contract.exchange = "SMART"
+    contract.currency = "USD"
+    return contract
+
+
+def index_contract(symbol: str, exchange: str = "CBOE") -> Contract:
+    """Create an index contract such as the CBOE VIX."""
+    contract = Contract()
+    contract.symbol = symbol
+    contract.secType = "IND"
+    contract.exchange = exchange
     contract.currency = "USD"
     return contract
 

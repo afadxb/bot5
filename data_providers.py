@@ -8,9 +8,8 @@ from abc import ABC, abstractmethod
 from typing import Iterator, Optional, Tuple
 
 import pandas as pd
-import requests
 
-from ibkr_client import IBKRClient, stock_contract
+from ibkr_client import IBKRClient, stock_contract, index_contract
 
 
 class DataProvider(ABC):
@@ -27,8 +26,9 @@ class DataProvider(ABC):
         interval:
             Data interval such as ``"60min"`` or ``"15min"``.
         outputsize:
-            Either ``"compact"`` (latest 100 points) or ``"full"`` as defined
-            by the Alpha Vantage API documentation.
+            Either ``"compact"`` or ``"full"``. Providers may interpret these
+            values differently; the :class:`IBKRDataProvider` maps "compact" to
+            a 1-day lookback and "full" to a 1-month lookback.
         """
 
     @abstractmethod
@@ -58,101 +58,25 @@ class DataProvider(ABC):
             time.sleep(poll_interval)
 
 
-class AlphaVantageDataProvider(DataProvider):
-    """Fetch historical and real-time data from the Alpha Vantage REST API."""
-
-    def __init__(self, api_key: str, base_url: str = "https://www.alphavantage.co/query") -> None:
-        self.api_key = api_key
-        self.base_url = base_url
-        self.logger = logging.getLogger(__name__)
-
-    def get_historical_data(
-        self, symbol: str, interval: str, outputsize: str = "compact"
-    ) -> pd.DataFrame:
-        outputsize = outputsize if outputsize in {"compact", "full"} else "compact"
-        params = {
-            "function": "TIME_SERIES_INTRADAY",
-            "symbol": symbol,
-            "interval": interval,
-            "outputsize": outputsize,
-            "datatype": "json",
-            "apikey": self.api_key,
-        }
-
-        try:
-            response = requests.get(self.base_url, params=params, timeout=10)
-            response.raise_for_status()
-            data = response.json()
-        except Exception as exc:  # pragma: no cover - network dependent
-            self.logger.error("Alpha Vantage request failed: %s", exc)
-            return pd.DataFrame()
-
-        series_key = f"Time Series ({interval})"
-        payload = data.get(series_key)
-        if not payload:
-            note = data.get("Note")
-            error = data.get("Error Message")
-            if note:
-                self.logger.warning("Alpha Vantage notice: %s", note)
-            if error:
-                self.logger.error("Alpha Vantage error: %s", error)
-            return pd.DataFrame()
-
-        records = []
-        for ts, vals in sorted(payload.items()):
-            records.append(
-                {
-                    "date": pd.to_datetime(ts),
-                    "open": float(vals.get("1. open", 0)),
-                    "high": float(vals.get("2. high", 0)),
-                    "low": float(vals.get("3. low", 0)),
-                    "close": float(vals.get("4. close", 0)),
-                    "volume": float(vals.get("5. volume", 0)),
-                }
-            )
-
-        if not records:
-            return pd.DataFrame()
-
-        df = pd.DataFrame.from_records(records).set_index("date")
-        return df
-
-    def get_quote(self, symbol: str) -> Optional[float]:
-        params = {
-            "function": "GLOBAL_QUOTE",
-            "symbol": symbol,
-            "datatype": "json",
-            "apikey": self.api_key,
-        }
-
-        try:
-            response = requests.get(self.base_url, params=params, timeout=10)
-            response.raise_for_status()
-            data = response.json()
-        except Exception as exc:  # pragma: no cover - network dependent
-            self.logger.error("Alpha Vantage quote request failed: %s", exc)
-            return None
-
-        quote = data.get("Global Quote")
-        if not quote:
-            note = data.get("Note")
-            error = data.get("Error Message")
-            if note:
-                self.logger.warning("Alpha Vantage notice: %s", note)
-            if error:
-                self.logger.error("Alpha Vantage error: %s", error)
-            return None
-
-        price = quote.get("05. price")
-        return float(price) if price is not None else None
-
-
 class IBKRDataProvider(DataProvider):
     """Fetch historical and real-time data from Interactive Brokers."""
 
     def __init__(self, client: IBKRClient) -> None:
         self.client = client
         self.logger = logging.getLogger(__name__)
+
+    @staticmethod
+    def _contract_for_symbol(symbol: str):
+        """Return an appropriate IBKR contract for *symbol*.
+
+        VIX is traded as an index on CBOE rather than a stock.  Handling it
+        here prevents ``No security definition`` errors when requesting
+        historical data or quotes.
+        """
+        normalized = symbol.lstrip("^").upper()
+        if normalized == "VIX":
+            return index_contract("VIX")
+        return stock_contract(symbol)
 
     @staticmethod
     def _map_interval(interval: str) -> str:
@@ -172,7 +96,7 @@ class IBKRDataProvider(DataProvider):
     def get_historical_data(
         self, symbol: str, interval: str, outputsize: str = "compact"
     ) -> pd.DataFrame:
-        contract = stock_contract(symbol)
+        contract = self._contract_for_symbol(symbol)
         bar_size = self._map_interval(interval)
         duration = self._map_duration(outputsize)
 
@@ -185,7 +109,7 @@ class IBKRDataProvider(DataProvider):
             return pd.DataFrame()
 
     def get_quote(self, symbol: str) -> Optional[float]:
-        contract = stock_contract(symbol)
+        contract = self._contract_for_symbol(symbol)
         try:
             df = self.client.request_historical_data(
                 contract, duration="1 D", bar_size="1 min"
