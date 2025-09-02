@@ -38,7 +38,7 @@ class IBKRBroker(BrokerAPI):
         contract = stock_contract(order.symbol)
         ib_order = IBOrder()
         ib_order.action = order.side
-        ib_order.totalQuantity = order.quantity
+        ib_order.totalQuantity = int(order.quantity)
         if order.order_type == OrderType.LMT:
             ib_order.orderType = "LMT"
             ib_order.lmtPrice = order.limit_price or 0.0
