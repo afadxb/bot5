@@ -19,7 +19,7 @@ from models import (MarketRegime, Order, OrderStatus, OrderType,
 from data_access import DataManager
 from order_management import OrderManager
 from ibkr_client import IBKRClient
-from data_providers import YahooDataProvider
+from data_providers import IBKRDataProvider
 from brokers import IBKRBroker
 
 
@@ -717,7 +717,7 @@ class SentimentAnalyzer:
 class TradingBot:
     """High-level orchestrator coordinating data, scoring and orders."""
 
-    def __init__(self, broker: IBKRBroker | None = None, data_provider: YahooDataProvider | None = None):
+    def __init__(self, broker: IBKRBroker | None = None, data_provider: IBKRDataProvider | None = None):
         self.logger = logging.getLogger(f"{__name__}.TradingBot")
 
         self.data_manager = DataManager()
@@ -740,8 +740,8 @@ class TradingBot:
             self.logger.warning(f"IBKR client unavailable: {e}")
             self.ibkr = None
 
-        if self.data_provider is None:
-            self.data_provider = YahooDataProvider()
+        if self.data_provider is None and self.ibkr:
+            self.data_provider = IBKRDataProvider(self.ibkr)
 
         self.order_manager = OrderManager(self.data_manager, broker=self.broker)
         # Load any persisted positions and display account state

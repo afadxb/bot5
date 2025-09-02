@@ -10,10 +10,7 @@ from typing import Iterator, Optional, Tuple
 import pandas as pd
 import requests
 
-try:  # pragma: no cover - optional dependency
-    import yfinance as yf
-except Exception:  # pragma: no cover - allow import failure until installed
-    yf = None
+from ibkr_client import IBKRClient, stock_contract
 
 
 class DataProvider(ABC):
@@ -62,11 +59,7 @@ class DataProvider(ABC):
 
 
 class AlphaVantageDataProvider(DataProvider):
-    """Fetch historical and real-time data from the Alpha Vantage REST API.
-
-    The provider returns empty results if the request fails for any reason,
-    allowing the calling code to gracefully fall back to other data sources.
-    """
+    """Fetch historical and real-time data from the Alpha Vantage REST API."""
 
     def __init__(self, api_key: str, base_url: str = "https://www.alphavantage.co/query") -> None:
         self.api_key = api_key
@@ -154,68 +147,53 @@ class AlphaVantageDataProvider(DataProvider):
         return float(price) if price is not None else None
 
 
-class YahooDataProvider(DataProvider):
-    """Fetch historical and real-time data from Yahoo Finance using ``yfinance``."""
+class IBKRDataProvider(DataProvider):
+    """Fetch historical and real-time data from Interactive Brokers."""
 
-    def __init__(self) -> None:
+    def __init__(self, client: IBKRClient) -> None:
+        self.client = client
         self.logger = logging.getLogger(__name__)
 
     @staticmethod
     def _map_interval(interval: str) -> str:
         mapping = {
-            "1min": "1m",
-            "5min": "5m",
-            "15min": "15m",
-            "30min": "30m",
-            "60min": "60m",
+            "1min": "1 min",
+            "5min": "5 mins",
+            "15min": "15 mins",
+            "30min": "30 mins",
+            "60min": "1 hour",
         }
-        return mapping.get(interval, "1h")
+        return mapping.get(interval, "1 min")
+
+    @staticmethod
+    def _map_duration(outputsize: str) -> str:
+        return "1 M" if outputsize == "full" else "1 D"
 
     def get_historical_data(
         self, symbol: str, interval: str, outputsize: str = "compact"
     ) -> pd.DataFrame:
-        if yf is None:  # pragma: no cover - dependency missing
-            self.logger.error("yfinance is not available")
-            return pd.DataFrame()
-
-        yahoo_interval = self._map_interval(interval)
-        period = "7d" if outputsize == "compact" else "max"
+        contract = stock_contract(symbol)
+        bar_size = self._map_interval(interval)
+        duration = self._map_duration(outputsize)
 
         try:
-            df = yf.download(
-                symbol,
-                period=period,
-                interval=yahoo_interval,
-                progress=False,
+            return self.client.request_historical_data(
+                contract, duration=duration, bar_size=bar_size
             )
         except Exception as exc:  # pragma: no cover - network dependent
-            self.logger.error("Yahoo Finance download failed: %s", exc)
+            self.logger.error("IBKR historical data request failed: %s", exc)
             return pd.DataFrame()
-
-        if df.empty:
-            return pd.DataFrame()
-
-        df = df.rename(
-            columns={
-                "Open": "open",
-                "High": "high",
-                "Low": "low",
-                "Close": "close",
-                "Volume": "volume",
-            }
-        )
-        df.index.name = "date"
-        return df[["open", "high", "low", "close", "volume"]]
 
     def get_quote(self, symbol: str) -> Optional[float]:
-        if yf is None:  # pragma: no cover - dependency missing
-            self.logger.error("yfinance is not available")
+        contract = stock_contract(symbol)
+        try:
+            df = self.client.request_historical_data(
+                contract, duration="1 D", bar_size="1 min"
+            )
+        except Exception as exc:  # pragma: no cover - network dependent
+            self.logger.error("IBKR quote request failed: %s", exc)
             return None
 
-        try:
-            ticker = yf.Ticker(symbol)
-            price = ticker.fast_info.get("last_price")
-            return float(price) if price is not None else None
-        except Exception as exc:  # pragma: no cover - network dependent
-            self.logger.error("Yahoo Finance quote request failed: %s", exc)
+        if df.empty:
             return None
+        return float(df["close"].iloc[-1])

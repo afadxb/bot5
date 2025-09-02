@@ -8,7 +8,7 @@ experimentation or further extension.
 
 ## Features
 
-- Pulls historical and real‑time market data from Yahoo Finance or Alpha Vantage
+- Pulls historical and real‑time market data from IBKR
 - Persists orders, positions and analytics snapshots to a local SQLite database
 - Scores symbols using a rich set of technical indicators and market regime
   filters
@@ -89,8 +89,7 @@ pytest -q
 ## Notes
 
 The bot integrates with real broker APIs and market data providers.  By default
-it retrieves market data from Yahoo Finance while IBKR handles account
-management and order execution.  The included `ibkr_client.py` demonstrates how
-to request historical data and submit basic orders while respecting IBKR pacing
-limitations.
+IBKR supplies both market data and order execution.  The included
+`ibkr_client.py` demonstrates how to request historical data and submit basic
+orders while respecting IBKR pacing limitations.
 
