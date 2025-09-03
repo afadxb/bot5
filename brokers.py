@@ -41,6 +41,13 @@ class IBKRBroker(BrokerAPI):
         contract = stock_contract(order.symbol)
         ib_order = IBOrder()
         ib_order.action = order.side
+        # Explicitly disable unsupported broker attributes.
+        # Some IBKR API versions default ``eTradeOnly`` to ``True``,
+        # which can trigger error 10268 ("'EtradeOnly' order attribute is not supported")
+        # when the field is sent to the server.  Setting it to ``False`` prevents
+        # the attribute from being transmitted.
+        if hasattr(ib_order, "eTradeOnly"):
+            ib_order.eTradeOnly = False
 
         # Ensure we don't submit fractional share sizes which older API
         # versions cannot handle.  Trim to an integer and log the adjustment

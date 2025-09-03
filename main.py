@@ -46,6 +46,7 @@ def _validate_env() -> None:
 
 def main():
     """Entry point for running the trading bot."""
+    bot = None
     try:
         mode = None
         if len(sys.argv) > 1:
@@ -70,11 +71,13 @@ def main():
         _validate_env()
         bot = TradingBot()
         bot.run_hourly()  # Run one full cycle before returning
-        return bot  # Wrap in a scheduler for continuous execution
     except Exception as exc:  # pragma: no cover - integration dependent
         logging.exception("Fatal error starting trading bot")
         send_alert(f"Trading bot error: {exc}")
         raise
+    finally:
+        if bot:
+            bot.shutdown()
 
 
 if __name__ == "__main__":
