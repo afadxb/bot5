@@ -778,17 +778,53 @@ class TradingBot:
         self.current_regime = MarketRegime.RISK_OFF
     
     def _load_sp100_universe(self):
-        """Load the S&P 100 trading universe and exclude SPY/VIX symbols."""
-        csv_path = os.environ.get("SP100_CSV")
-        if not csv_path or not os.path.exists(csv_path):
-            raise RuntimeError("SP100_CSV environment variable must point to constituent CSV")
-        with open(csv_path, newline="") as f:
-            reader = csv.DictReader(f)
-            symbols = [row["Symbol"].strip() for row in reader if row.get("Symbol")]
+        """Load the S&P 100 trading universe and exclude SPY/VIX symbols.
 
-        # SPY and VIX are used only for market-regime checks and should never be traded
+        Supports two CSV formats:
+        - Headerless file with one symbol per line (e.g., "AAPL")
+        - CSV with a header containing a "Symbol" column
+        """
+        csv_path = os.environ.get("SP100_CSV") or "sp100.csv"
+        if not os.path.exists(csv_path):
+            raise RuntimeError("SP100_CSV not set or file not found; expected sp100.csv in project root or set SP100_CSV env var")
+
+        symbols: List[str] = []
+        try:
+            with open(csv_path, newline="") as f:
+                rows = [row for row in csv.reader(f) if row and any(col.strip() for col in row)]
+                if not rows:
+                    return []
+
+                first = [c.strip() for c in rows[0]]
+
+                # Case 1: single-column list without header
+                if len(first) == 1 and first[0].upper() != "SYMBOL":
+                    symbols = [r[0].strip() for r in rows if r and r[0].strip()]
+                else:
+                    # Case 2: CSV with header; try to find a 'Symbol' column
+                    header = [c.strip() for c in first]
+                    try:
+                        sym_idx = next(i for i, name in enumerate(header) if name.lower() == "symbol")
+                    except StopIteration:
+                        # Fallback to first column if no explicit header found
+                        sym_idx = 0
+                    # Remaining rows contain data
+                    symbols = [r[sym_idx].strip() for r in rows[1:] if len(r) > sym_idx and r[sym_idx].strip()]
+        except Exception as e:
+            self.logger.error(f"Failed to load symbols from {csv_path}: {e}")
+            raise
+
+        # Normalize, de-duplicate and exclude non-tradables used for regime detection
         exclusions = {"SPY", "VIX", "^VIX"}
-        return [s for s in symbols if s.upper() not in exclusions]
+        unique_syms = []
+        seen = set()
+        for s in (sym.upper() for sym in symbols):
+            if s and s not in exclusions and s not in seen:
+                unique_syms.append(s)
+                seen.add(s)
+
+        self.logger.info(f"Loaded {len(unique_syms)} symbols from {csv_path}")
+        return unique_syms
 
     def _print_account_status(self):
         """Log current account balance and any open positions."""
@@ -865,48 +901,119 @@ class TradingBot:
     
     def _process_symbol(self, symbol):
         """Process a single symbol for potential entry"""
-        # Get historical data for symbol
-        daily_data = self._fetch_symbol_data(symbol, 100, '1D')
-        hourly_data = self._fetch_symbol_data(symbol, 50, '1H')
-        
-        # Roll up 1H to 4H data
+        assessment = self._assess_entry(symbol)
+        if assessment.get("status") != "ok":
+            return
+
+        entry_score = assessment["entry_score"]
+        score_components = assessment["score_components"]
+        self.logger.info(f"{symbol} entry score: {entry_score}, components: {score_components}")
+
+        if entry_score >= ENTRY_SCORE_THRESHOLD and assessment.get("near_support"):
+            self.logger.info(
+                f"{symbol} meets entry criteria near support: {assessment.get('support_info')}"
+            )
+            self._place_entry_order(
+                symbol,
+                assessment["daily_data"],
+                assessment["four_hour_data"],
+                assessment.get("support_info"),
+                entry_score,
+                score_components,
+            )
+        elif entry_score >= ENTRY_SCORE_THRESHOLD:
+            self.logger.info(
+                f"{symbol} meets score criteria but not near support: {assessment.get('support_info')}"
+            )
+
+    def _assess_entry(self, symbol: str) -> dict:
+        """Compute entry readiness for a symbol without placing orders.
+
+        Returns a dict with keys: status, symbol, entry_score, score_components,
+        daily_data, four_hour_data, near_support, support_info.
+        """
+        try:
+            daily_data = self._fetch_symbol_data(symbol, 100, '1D')
+            hourly_data = self._fetch_symbol_data(symbol, 50, '1H')
+        except Exception as e:
+            self.logger.warning(f"Failed to fetch data for {symbol}: {e}")
+            return {"status": "no_data", "symbol": symbol}
+
         four_hour_data = self.data_rollup.rollup_1h_to_4h(hourly_data)
-        
         if len(four_hour_data) == 0:
             self.logger.warning(f"Insufficient data for {symbol}, skipping")
-            return
-        
+            return {"status": "insufficient", "symbol": symbol}
+
         # Calculate indicators
-        daily_data = self._calculate_indicators(daily_data)
-        four_hour_data = self._calculate_indicators(four_hour_data)
-        
+        daily_data_i = self._calculate_indicators(daily_data)
+        four_hour_data_i = self._calculate_indicators(four_hour_data)
+
         # Calculate entry score
         entry_score, score_components = self.scoring_engine.calculate_entry_score(
-            symbol, daily_data, four_hour_data, self.current_regime
+            symbol, daily_data_i, four_hour_data_i, self.current_regime
         )
-        
+
         # Apply sentiment gate
         entry_score, sentiment_info = self.sentiment_analyzer.apply_sentiment_gate(
             entry_score, symbol, self.current_regime
         )
-        
-        self.logger.info(f"{symbol} entry score: {entry_score}, components: {score_components}")
 
-        # Check if entry conditions are met
+        support_info = None
+        near_support = None
         if entry_score >= ENTRY_SCORE_THRESHOLD:
-            # Check near-support rule
-            support_info = self.support_analyzer.identify_support_level(symbol, daily_data, four_hour_data)
+            support_info = self.support_analyzer.identify_support_level(
+                symbol, daily_data_i, four_hour_data_i
+            )
             near_support = self.support_analyzer.is_near_support(
                 support_info,
                 SUPPORT_DISTANCE_ATR,
                 SUPPORT_DISTANCE_PCT,
             )
-            
-            if near_support:
-                self.logger.info(f"{symbol} meets entry criteria near support: {support_info}")
-                self._place_entry_order(symbol, daily_data, four_hour_data, support_info, entry_score, score_components)
-            else:
-                self.logger.info(f"{symbol} meets score criteria but not near support: {support_info}")
+
+        return {
+            "status": "ok",
+            "symbol": symbol,
+            "entry_score": entry_score,
+            "score_components": score_components,
+            "daily_data": daily_data_i,
+            "four_hour_data": four_hour_data_i,
+            "support_info": support_info,
+            "near_support": near_support,
+            "regime": self.current_regime,
+        }
+
+    def scan_universe(self, max_symbols: int | None = None) -> list[dict]:
+        """Evaluate all symbols in the universe and return assessments.
+
+        Does not place orders. Useful for dry-run scans or reporting.
+        """
+        # Ensure we have a current regime
+        try:
+            self._detect_market_regime()
+        except Exception:
+            pass
+
+        results: list[dict] = []
+        symbols = self.universe[:max_symbols] if max_symbols else self.universe
+        for sym in symbols:
+            try:
+                res = self._assess_entry(sym)
+            except Exception as e:
+                self.logger.error(f"Assessment failed for {sym}: {e}")
+                res = {"status": "error", "symbol": sym, "error": str(e)}
+            results.append(res)
+
+        # Log a compact summary
+        for r in results:
+            if r.get("status") != "ok":
+                self.logger.info(f"{r.get('symbol')}: {r.get('status')}")
+                continue
+            sym = r["symbol"]
+            score = r["entry_score"]
+            near = r.get("near_support")
+            self.logger.info(f"Scan {sym}: score={score:.1f}, near_support={near}")
+
+        return results
     
     def _place_entry_order(self, symbol, daily_data, four_hour_data, support_info, entry_score, score_components):
         """Place an entry order for a symbol"""
