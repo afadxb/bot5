@@ -4,17 +4,19 @@ This document outlines the high-level responsibilities and data flow between mod
 
 ## entry conditions
 The bot enters a trade only when all of the following conditions are satisfied:
-**High entry score:**
+
+**1- High entry score:**
 A composite “entry score” is computed from four weighted categories—trend (45 pts), momentum (30 pts), volume (15 pts), and setup/location (10 pts). Each category contributes points through specific rules such as price above key moving averages and bullish supertrend (trend), RSI and MACD signals (momentum), strong relative volume and positive OBV slope (volume), and pullback-within-value or upper-half Bollinger position (setup)
 
-**Sentiment gate:**
+**2- Sentiment gate:**
 The score is adjusted for market sentiment. Extreme fear (<25) or a risk‑off regime with low score/negative news blocks the trade, while positive or negative news further tweaks the score
 
-**Score threshold:**
+**3- Score threshold:**
 After sentiment adjustments, the entry score must be at least 70 to proceed
 
-**Price near support:**
+**4- Price near support:**
 The symbol’s price must sit near a prioritized support level—within 0.5 ATR or 0.5 % of that support
+
 Only when all these criteria are met does the strategy place an order for that symbol.
 
 ## Module Responsibilities
