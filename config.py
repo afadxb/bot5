@@ -16,7 +16,7 @@ load_dotenv()
 # Timezone and market schedule
 EASTERN_TZ = pytz.timezone('America/New_York')
 MARKET_OPEN = time(9, 30)
-MARKET_CLOSE = time(16, 0)
+MARKET_CLOSE = time(23, 0)
 FOUR_HOUR_TIMES = [time(9, 30), time(13, 30)]
 
 # Environment configurable settings
