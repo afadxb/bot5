@@ -900,6 +900,16 @@ class TradingBot:
                 )
         else:
             self.logger.info("No open positions loaded")
+
+    def shutdown(self) -> None:
+        """Release external resources such as the IBKR client connection."""
+        if self.ibkr:
+            try:  # pragma: no cover - network dependent
+                self.ibkr.disconnect()
+            except Exception as e:  # pragma: no cover - network dependent
+                self.logger.warning(f"Error disconnecting IBKR client: {e}")
+            finally:
+                self.ibkr = None
     
     def run_hourly(self):
         """Main hourly execution loop"""
