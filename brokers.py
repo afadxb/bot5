@@ -38,7 +38,20 @@ class IBKRBroker(BrokerAPI):
         contract = stock_contract(order.symbol)
         ib_order = IBOrder()
         ib_order.action = order.side
-        ib_order.totalQuantity = int(order.quantity)
+
+        # Ensure we don't submit fractional share sizes which older API
+        # versions cannot handle.  Trim to an integer and log the adjustment
+        # so the caller is aware of the change.
+        qty = int(order.quantity)
+        if qty != order.quantity:
+            self.logger.warning(
+                "Rounded fractional quantity %s to %s for %s",
+                order.quantity,
+                qty,
+                order.order_id,
+            )
+        order.quantity = qty
+        ib_order.totalQuantity = qty
         if order.order_type == OrderType.LMT:
             ib_order.orderType = "LMT"
             ib_order.lmtPrice = order.limit_price or 0.0
