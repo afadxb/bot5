@@ -13,7 +13,29 @@ import json
 import requests
 from typing import Dict, List, Optional, Tuple
 
-from config import (EASTERN_TZ, MARKET_OPEN, MARKET_CLOSE, FOUR_HOUR_TIMES)
+from config import (
+    EASTERN_TZ,
+    MARKET_OPEN,
+    MARKET_CLOSE,
+    FOUR_HOUR_TIMES,
+    ENTRY_SCORE_THRESHOLD,
+    SUPPORT_DISTANCE_ATR,
+    SUPPORT_DISTANCE_PCT,
+    FG_HARD_BLOCK_THRESHOLD,
+    FG_PENALTY_THRESHOLD,
+    FG_OVERHEAT_THRESHOLD,
+    FG_PENALTY,
+    FG_OVERHEAT_PENALTY,
+    NEWS_POSITIVE_THRESHOLD,
+    NEWS_NEGATIVE_THRESHOLD,
+    NEWS_POSITIVE_BONUS,
+    NEWS_NEGATIVE_PENALTY,
+    RISK_OFF_MIN_SCORE,
+    RISK_OFF_NEWS_THRESHOLD,
+    ACCOUNT_EQUITY,
+    RISK_PER_TRADE,
+    MAX_POSITION_PCT,
+)
 from models import (MarketRegime, Order, OrderStatus, OrderType,
                     Position, PositionStatus)
 from data_access import DataManager
@@ -271,7 +293,7 @@ class SupportLevelAnalyzer:
         
         return vwap.iloc[-1] if len(vwap) > 0 else None
     
-    def is_near_support(self, support_info, max_distance_atr=0.5, max_distance_pct=0.5):
+    def is_near_support(self, support_info, max_distance_atr=SUPPORT_DISTANCE_ATR, max_distance_pct=SUPPORT_DISTANCE_PCT):
         """
         Check if price is near support based on the rules
         """
@@ -578,7 +600,11 @@ class ScoringEngine:
         return score, confirmation
 
 class RegimeDetector:
-    """Infer the prevailing market regime using SPY and VIX data."""
+    """Infer the prevailing market regime using SPY and VIX data.
+
+    These market gauges are consumed solely for regime detection and are
+    explicitly excluded from the tradable universe.
+    """
 
     def __init__(self):
         self.logger = logging.getLogger(f"{__name__}.RegimeDetector")
@@ -689,24 +715,24 @@ class SentimentAnalyzer:
         news_sentiment = self.get_news_sentiment(symbol)
         
         # Apply Fear & Greed penalties
-        if fg_index < 25:
+        if fg_index < FG_HARD_BLOCK_THRESHOLD:
             # Hard block - return very low score
             return 0, {"fg_index": fg_index, "news_sentiment": news_sentiment, "action": "hard_block"}
-        elif 25 <= fg_index <= 45:
-            entry_score -= 5
-        elif fg_index > 80:
+        elif fg_index <= FG_PENALTY_THRESHOLD:
+            entry_score -= FG_PENALTY
+        elif fg_index > FG_OVERHEAT_THRESHOLD:
             # Check if RSI > 70 for overheat penalty
             # This would require RSI data, simplified here
-            entry_score -= 5
-        
+            entry_score -= FG_OVERHEAT_PENALTY
+
         # Apply news sentiment adjustments
-        if news_sentiment > 0.7:  # Strong positive
-            entry_score += 3
-        elif news_sentiment < -0.7:  # Strong negative
-            entry_score -= 5
+        if news_sentiment > NEWS_POSITIVE_THRESHOLD:
+            entry_score += NEWS_POSITIVE_BONUS
+        elif news_sentiment < NEWS_NEGATIVE_THRESHOLD:
+            entry_score -= NEWS_NEGATIVE_PENALTY
 
         # Risk-off regime gating
-        if regime == MarketRegime.RISK_OFF and (entry_score < 85 or news_sentiment < 0):
+        if regime == MarketRegime.RISK_OFF and (entry_score < RISK_OFF_MIN_SCORE or news_sentiment < RISK_OFF_NEWS_THRESHOLD):
             return 0, {"fg_index": fg_index, "news_sentiment": news_sentiment, "action": "risk_off_block"}
 
         # Ensure score is within bounds
@@ -752,13 +778,17 @@ class TradingBot:
         self.current_regime = MarketRegime.RISK_OFF
     
     def _load_sp100_universe(self):
-        """Load the S&P 100 universe from a CSV file specified by `SP100_CSV`."""
+        """Load the S&P 100 trading universe and exclude SPY/VIX symbols."""
         csv_path = os.environ.get("SP100_CSV")
         if not csv_path or not os.path.exists(csv_path):
             raise RuntimeError("SP100_CSV environment variable must point to constituent CSV")
         with open(csv_path, newline="") as f:
             reader = csv.DictReader(f)
-            return [row["Symbol"].strip() for row in reader if row.get("Symbol")]
+            symbols = [row["Symbol"].strip() for row in reader if row.get("Symbol")]
+
+        # SPY and VIX are used only for market-regime checks and should never be traded
+        exclusions = {"SPY", "VIX", "^VIX"}
+        return [s for s in symbols if s.upper() not in exclusions]
 
     def _print_account_status(self):
         """Log current account balance and any open positions."""
@@ -861,12 +891,16 @@ class TradingBot:
         )
         
         self.logger.info(f"{symbol} entry score: {entry_score}, components: {score_components}")
-        
+
         # Check if entry conditions are met
-        if entry_score >= 70:
+        if entry_score >= ENTRY_SCORE_THRESHOLD:
             # Check near-support rule
             support_info = self.support_analyzer.identify_support_level(symbol, daily_data, four_hour_data)
-            near_support = self.support_analyzer.is_near_support(support_info)
+            near_support = self.support_analyzer.is_near_support(
+                support_info,
+                SUPPORT_DISTANCE_ATR,
+                SUPPORT_DISTANCE_PCT,
+            )
             
             if near_support:
                 self.logger.info(f"{symbol} meets entry criteria near support: {support_info}")
@@ -877,8 +911,8 @@ class TradingBot:
     def _place_entry_order(self, symbol, daily_data, four_hour_data, support_info, entry_score, score_components):
         """Place an entry order for a symbol"""
         # Calculate position size
-        account_equity = 100000  # Example equity
-        risk_per_trade = account_equity * 0.01  # 1% risk per trade
+        account_equity = ACCOUNT_EQUITY
+        risk_per_trade = account_equity * RISK_PER_TRADE
         
         current_price = four_hour_data['close'].iloc[-1]
         atr = daily_data['atr_14'].iloc[-1]
@@ -891,7 +925,7 @@ class TradingBot:
         position_size = int(risk_per_trade / risk_per_share)
         
         # Ensure we don't exceed available capital
-        max_capital = account_equity * 0.1  # Max 10% per position
+        max_capital = account_equity * MAX_POSITION_PCT  # Max capital per position
         max_shares = int(max_capital / current_price)
         position_size = min(position_size, max_shares)
         
