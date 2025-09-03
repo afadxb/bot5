@@ -93,6 +93,11 @@ except Exception:  # pragma: no cover - allow compilation without ibapi
         auxPrice: float = 0.0
         trailingPercent: float = 0.0
         trailStopPrice: float = 0.0
+        # Bracket/OCO fields
+        transmit: bool = True
+        parentId: int = 0
+        ocaGroup: str = ""
+        ocaType: int = 1
 
     logger.warning("`ibapi` package not available; IBKRClient methods will raise IBAPIUnavailableError")
 
@@ -174,7 +179,10 @@ class IBKRClient(EWrapper, EClient):
             keepUpToDate=False,
             chartOptions=[],
         )
-        self._finished.wait()
+        # Wait for completion with a timeout to avoid deadlocks
+        finished = self._finished.wait(timeout=30)
+        if not finished:
+            self.logger.warning("Historical data request timed out: %s %s", duration, bar_size)
 
         df = pd.DataFrame(self._historical, columns=["date", "open", "high", "low", "close", "volume"])
         if not df.empty:
@@ -194,7 +202,7 @@ class IBKRClient(EWrapper, EClient):
         """Submit an order and return the IBKR order id."""
         if self._next_order_id is None:
             self.reqIds(-1)
-            self._next_id_ready.wait()
+            self._next_id_ready.wait(timeout=10)
         oid = self._next_order_id
         super().placeOrder(oid, contract, order)
         self._next_order_id += 1
@@ -220,7 +228,7 @@ class IBKRClient(EWrapper, EClient):
         self._summary_done.clear()
 
         # Request a couple of common fields. Users can extend this as needed.
-        self.reqAccountSummary(1, "All", "TotalCashValue,BuyingPower")
+        self.reqAccountSummary(1, "All", "TotalCashValue,BuyingPower,NetLiquidation")
         self._summary_done.wait()
         self.cancelAccountSummary(1)
         return dict(self._account_summary)

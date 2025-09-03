@@ -64,6 +64,8 @@ class IBKRDataProvider(DataProvider):
     def __init__(self, client: IBKRClient) -> None:
         self.client = client
         self.logger = logging.getLogger(__name__)
+        self._last_request = 0.0
+        self._min_interval = 0.35  # seconds, conservative vs IB pacing
 
     @staticmethod
     def _contract_for_symbol(symbol: str):
@@ -86,38 +88,85 @@ class IBKRDataProvider(DataProvider):
             "15min": "15 mins",
             "30min": "30 mins",
             "60min": "1 hour",
+            "daily": "1 day",
         }
         return mapping.get(interval, "1 min")
 
     @staticmethod
-    def _map_duration(outputsize: str) -> str:
-        return "1 M" if outputsize == "full" else "1 D"
+    def _map_duration(interval: str, outputsize: str) -> str:
+        """Map desired output size to an IBKR duration string.
+
+        IBKR expects human strings like "3 D", "2 W", "6 M", "1 Y". Choose a
+        conservative window large enough to satisfy most requests while
+        avoiding excessive data volume.
+        """
+        if interval == "daily":
+            return "2 Y" if outputsize == "full" else "3 M"
+        # Intraday bars
+        return "1 M" if outputsize == "full" else "3 D"
 
     def get_historical_data(
         self, symbol: str, interval: str, outputsize: str = "compact"
     ) -> pd.DataFrame:
         contract = self._contract_for_symbol(symbol)
         bar_size = self._map_interval(interval)
-        duration = self._map_duration(outputsize)
+        duration = self._map_duration(interval, outputsize)
 
-        try:
-            return self.client.request_historical_data(
-                contract, duration=duration, bar_size=bar_size
-            )
-        except Exception as exc:  # pragma: no cover - network dependent
-            self.logger.error("IBKR historical data request failed: %s", exc)
-            return pd.DataFrame()
+        def throttle():
+            now = time.monotonic()
+            wait = self._min_interval - (now - self._last_request)
+            if wait > 0:
+                time.sleep(wait)
+            self._last_request = time.monotonic()
+
+        tries = 3
+        delay = 0.5
+        for attempt in range(tries):
+            try:
+                throttle()
+                df = self.client.request_historical_data(
+                    contract, duration=duration, bar_size=bar_size
+                )
+                if not df.empty:
+                    return df
+            except Exception as exc:  # pragma: no cover - network dependent
+                self.logger.warning(
+                    "IBKR historical data error for %s (attempt %s/%s): %s",
+                    symbol,
+                    attempt + 1,
+                    tries,
+                    exc,
+                )
+            time.sleep(delay)
+            delay *= 2
+        return pd.DataFrame()
 
     def get_quote(self, symbol: str) -> Optional[float]:
         contract = self._contract_for_symbol(symbol)
-        try:
-            df = self.client.request_historical_data(
-                contract, duration="1 D", bar_size="1 min"
-            )
-        except Exception as exc:  # pragma: no cover - network dependent
-            self.logger.error("IBKR quote request failed: %s", exc)
-            return None
+        tries = 3
+        delay = 0.5
+        for attempt in range(tries):
+            try:
+                # throttle requests
+                now = time.monotonic()
+                wait = self._min_interval - (now - self._last_request)
+                if wait > 0:
+                    time.sleep(wait)
+                self._last_request = time.monotonic()
 
-        if df.empty:
-            return None
-        return float(df["close"].iloc[-1])
+                df = self.client.request_historical_data(
+                    contract, duration="1 D", bar_size="1 min"
+                )
+                if not df.empty:
+                    return float(df["close"].iloc[-1])
+            except Exception as exc:  # pragma: no cover - network dependent
+                self.logger.warning(
+                    "IBKR quote request failed for %s (attempt %s/%s): %s",
+                    symbol,
+                    attempt + 1,
+                    tries,
+                    exc,
+                )
+            time.sleep(delay)
+            delay *= 2
+        return None

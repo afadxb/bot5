@@ -5,6 +5,7 @@ from datetime import datetime
 from typing import Dict, List
 
 from models import Order, OrderType, OrderStatus
+from config import ENABLE_TRADING
 from brokers import BrokerAPI
 
 
@@ -18,7 +19,7 @@ class OrderManager:
         self.broker = broker
         self.logger = logging.getLogger(f"{__name__}.OrderManager")
     
-    def place_bracket_order(self, symbol, quantity, entry_price, stop_loss, take_profit1, take_profit2=None):
+    def place_bracket_order(self, symbol, quantity, entry_price, stop_loss, take_profit1, take_profit2=None, position_id: str | None = None):
         """
         Place a bracket order (entry + OCO stop loss/take profit)
         """
@@ -49,7 +50,7 @@ class OrderManager:
             side="SELL",
             quantity=quantity,
             stop_price=stop_loss,
-            parent_order_id=entry_id,
+            parent_order_id=position_id or entry_id,
             status=OrderStatus.PENDING_NEW
         )
         
@@ -61,7 +62,7 @@ class OrderManager:
             side="SELL",
             quantity=quantity // 2 if take_profit2 else quantity,
             limit_price=take_profit1,
-            parent_order_id=entry_id,
+            parent_order_id=position_id or entry_id,
             status=OrderStatus.PENDING_NEW
         )
         
@@ -72,7 +73,10 @@ class OrderManager:
         self.orders[entry_id] = entry_order
         self.orders[stop_id] = stop_order
         self.orders[tp1_id] = tp1_order
-        self.position_orders.setdefault(entry_id, [entry_id]).extend([stop_id, tp1_id])
+        key = position_id or entry_id
+        self.position_orders.setdefault(key, [])
+        # Keep entry first for downstream logic that assumes index 0 is entry
+        self.position_orders[key].extend([entry_id, stop_id, tp1_id])
         
         # Create TP2 if specified
         if take_profit2:
@@ -84,12 +88,12 @@ class OrderManager:
                 side="SELL",
                 quantity=quantity - (quantity // 2),
                 limit_price=take_profit2,
-                parent_order_id=entry_id,
+                parent_order_id=position_id or entry_id,
                 status=OrderStatus.PENDING_NEW
             )
             entry_order.child_orders.append(tp2_id)
             self.orders[tp2_id] = tp2_order
-            self.position_orders[entry_id].append(tp2_id)
+            self.position_orders[key].append(tp2_id)
         
         # Save orders to database
         self.data_manager.save_order(entry_order)
@@ -98,7 +102,7 @@ class OrderManager:
         if take_profit2:
             self.data_manager.save_order(tp2_order)
 
-        if self.broker:
+        if self.broker and ENABLE_TRADING:
             self.broker.place_order(entry_order)
             self.broker.place_order(stop_order)
             self.broker.place_order(tp1_order)
@@ -146,7 +150,7 @@ class OrderManager:
             self.orders[trail_id] = trail_order
             self.position_orders[position_id].append(trail_id)
             self.data_manager.save_order(trail_order)
-            if self.broker:
+            if self.broker and ENABLE_TRADING:
                 self.broker.place_order(trail_order)
             
             self.logger.info(f"Trailing stop order placed for {original_order.symbol}")
@@ -165,7 +169,7 @@ class OrderManager:
             return False
         
         try:
-            if self.broker:
+            if self.broker and ENABLE_TRADING:
                 self.broker.cancel_order(order_id)
             order.status = OrderStatus.PENDING_CANCEL
             self.data_manager.save_order(order)
@@ -221,7 +225,7 @@ class OrderManager:
         self.orders[new_id] = stop_order
         self.position_orders[position_id].append(new_id)
         self.data_manager.save_order(stop_order)
-        if self.broker:
+        if self.broker and ENABLE_TRADING:
             self.broker.place_order(stop_order)
 
         self.logger.info(
@@ -237,7 +241,7 @@ class OrderManager:
             if order and order.order_type == OrderType.TRAIL:
                 order.trail_amount = new_trail
                 self.data_manager.save_order(order)
-                if self.broker:
+                if self.broker and ENABLE_TRADING:
                     self.broker.place_order(order)
                 self.logger.info(
                     f"Trailing stop for {order.symbol} upgraded to {new_trail}"

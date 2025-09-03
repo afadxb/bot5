@@ -27,6 +27,11 @@ class DataManager:
         """Initialize database tables"""
         with sqlite3.connect(self.db_path) as conn:
             cursor = conn.cursor()
+            # Enable WAL for better concurrent read performance
+            try:
+                cursor.execute('PRAGMA journal_mode=WAL;')
+            except Exception:
+                pass
 
             # Position table
             cursor.execute('''
@@ -68,6 +73,13 @@ class DataManager:
                     FOREIGN KEY (position_id) REFERENCES positions (position_id)
                 )
             ''')
+
+            # Useful indices for common queries
+            cursor.execute('CREATE INDEX IF NOT EXISTS idx_orders_symbol ON orders(symbol);')
+            cursor.execute('CREATE INDEX IF NOT EXISTS idx_orders_status ON orders(status);')
+            cursor.execute('CREATE INDEX IF NOT EXISTS idx_orders_parent ON orders(parent_order_id);')
+            cursor.execute('CREATE INDEX IF NOT EXISTS idx_orders_position ON orders(position_id);')
+            cursor.execute('CREATE INDEX IF NOT EXISTS idx_positions_symbol ON positions(symbol);')
 
             # Score snapshot table
             cursor.execute('''

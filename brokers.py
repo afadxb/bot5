@@ -33,6 +33,9 @@ class IBKRBroker(BrokerAPI):
     def __init__(self, client: IBKRClient) -> None:
         self.client = client
         self.logger = logging.getLogger(__name__)
+        # Map our strategy order ids and groups (position ids) to IB ids
+        self._ib_ids: dict[str, int] = {}
+        self._group_parent: dict[str, int] = {}
 
     def place_order(self, order: Order) -> str:  # pragma: no cover - network dependent
         contract = stock_contract(order.symbol)
@@ -61,14 +64,37 @@ class IBKRBroker(BrokerAPI):
         elif order.order_type == OrderType.TRAIL:
             ib_order.orderType = "TRAIL"
             ib_order.trailingPercent = order.trail_amount or 0.0
+        # Bracket/OCO setup: if this order belongs to a position group, wire parent/oca
+        group = order.parent_order_id
+        is_parent = order.order_type == OrderType.LMT and order.side.upper() == "BUY"
+        if group:
+            if is_parent:
+                # Parent entry; record mapping after placement
+                ib_order.transmit = True
+            else:
+                # Child legs reference parent's IB id and form an OCA group
+                parent_ib = self._group_parent.get(group)
+                if parent_ib:
+                    ib_order.parentId = parent_ib
+                ib_order.ocaGroup = str(group)
+                ib_order.ocaType = 1  # Cancel remaining when one fills
+                ib_order.transmit = True
+
         self.logger.info("Submitting %s to IBKR", order.order_id)
-        order_id = self.client.place_order(contract, ib_order)
-        return str(order_id)
+        ib_id = self.client.place_order(contract, ib_order)
+        self._ib_ids[order.order_id] = ib_id
+        if group and is_parent:
+            self._group_parent[group] = ib_id
+        return str(ib_id)
 
     def cancel_order(self, order_id: str) -> bool:  # pragma: no cover - network dependent
         self.logger.info("Cancelling order %s", order_id)
         try:
-            self.client.cancel_order(int(order_id))
+            ib_id = self._ib_ids.get(order_id)
+            if ib_id is None:
+                # Fallback: attempt to parse as int
+                ib_id = int(order_id)
+            self.client.cancel_order(int(ib_id))
             return True
         except Exception:
             return False

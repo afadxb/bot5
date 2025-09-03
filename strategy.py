@@ -83,48 +83,42 @@ class Indicators:
     
     @staticmethod
     def calculate_supertrend(high: pd.Series, low: pd.Series, close: pd.Series, atr: pd.Series, multiplier: float = 3) -> Tuple[pd.Series, pd.Series]:
-        # Basic upper and lower bands
-        hl2 = (high + low) / 2
+        """Vectorized Supertrend approximation using band crossovers and ffill state.
+
+        This implementation avoids per-row Python loops by computing bullish/
+        bearish switch points where price crosses the previous bands and then
+        forward-filling the regime state. The supertrend line is selected from
+        the corresponding band based on the active regime.
+        """
+        hl2 = (high + low) / 2.0
         upper_band = hl2 + (multiplier * atr)
         lower_band = hl2 - (multiplier * atr)
-        
-        # Initialize supertrend
-        supertrend = pd.Series(index=close.index, dtype=float)
-        direction = pd.Series(index=close.index, dtype=str)
-        
-        for i in range(1, len(close)):
-            if close.iloc[i] > upper_band.iloc[i-1]:
-                supertrend.iloc[i] = lower_band.iloc[i]
-                direction.iloc[i] = 'bullish'
-            elif close.iloc[i] < lower_band.iloc[i-1]:
-                supertrend.iloc[i] = upper_band.iloc[i]
-                direction.iloc[i] = 'bearish'
-            else:
-                supertrend.iloc[i] = supertrend.iloc[i-1]
-                direction.iloc[i] = direction.iloc[i-1]
-                
-                if supertrend.iloc[i] == upper_band.iloc[i-1] and close.iloc[i] > upper_band.iloc[i]:
-                    supertrend.iloc[i] = lower_band.iloc[i]
-                    direction.iloc[i] = 'bullish'
-                elif supertrend.iloc[i] == lower_band.iloc[i-1] and close.iloc[i] < lower_band.iloc[i]:
-                    supertrend.iloc[i] = upper_band.iloc[i]
-                    direction.iloc[i] = 'bearish'
-        
+
+        prev_upper = upper_band.shift(1)
+        prev_lower = lower_band.shift(1)
+
+        bullish_switch = close > prev_upper
+        bearish_switch = close < prev_lower
+
+        # Map switches to states: 1 bullish, -1 bearish, NaN otherwise; then ffill
+        state = pd.Series(index=close.index, dtype=float)
+        state[bullish_switch] = 1.0
+        state[bearish_switch] = -1.0
+        state = state.ffill().fillna(1.0)
+
+        supertrend = pd.Series(np.where(state >= 0, lower_band, upper_band), index=close.index)
+        direction = pd.Series(np.where(state >= 0, 'bullish', 'bearish'), index=close.index)
         return supertrend, direction
     
     @staticmethod
     def calculate_obv(close: pd.Series, volume: pd.Series) -> pd.Series:
-        obv = pd.Series(index=close.index, dtype=float)
-        obv.iloc[0] = volume.iloc[0]
-        
-        for i in range(1, len(close)):
-            if close.iloc[i] > close.iloc[i-1]:
-                obv.iloc[i] = obv.iloc[i-1] + volume.iloc[i]
-            elif close.iloc[i] < close.iloc[i-1]:
-                obv.iloc[i] = obv.iloc[i-1] - volume.iloc[i]
-            else:
-                obv.iloc[i] = obv.iloc[i-1]
-        
+        """Vectorized On-Balance Volume using sign of close change."""
+        delta = close.diff()
+        direction = np.sign(delta).fillna(0)
+        flow = (direction * volume).fillna(0)
+        obv = flow.cumsum()
+        if len(obv) > 0:
+            obv.iloc[0] = volume.iloc[0]
         return obv
 
 class DataRollUp:
@@ -237,6 +231,8 @@ class SupportLevelAnalyzer:
         
         # Calculate distances
         atr = daily_data['atr_14'].iloc[-1] if 'atr_14' in daily_data else 0
+        if pd.isna(atr):
+            atr = 0
         distance_pct = ((current_price - selected_price) / current_price) * 100
         distance_atr = (current_price - selected_price) / atr if atr > 0 else 0
         
@@ -417,26 +413,44 @@ class ScoringEngine:
         score = 0
         
         # Price > 200SMA (Daily): 12
-        if 'sma_200' in daily_data and daily_data['close'].iloc[-1] > daily_data['sma_200'].iloc[-1]:
+        if (
+            'sma_200' in daily_data and
+            pd.notna(daily_data['close'].iloc[-1]) and
+            pd.notna(daily_data['sma_200'].iloc[-1]) and
+            daily_data['close'].iloc[-1] > daily_data['sma_200'].iloc[-1]
+        ):
             score += 12
         
         # Price > 50SMA (Daily): 10
-        if 'sma_50' in daily_data and daily_data['close'].iloc[-1] > daily_data['sma_50'].iloc[-1]:
+        if (
+            'sma_50' in daily_data and
+            pd.notna(daily_data['close'].iloc[-1]) and
+            pd.notna(daily_data['sma_50'].iloc[-1]) and
+            daily_data['close'].iloc[-1] > daily_data['sma_50'].iloc[-1]
+        ):
             score += 10
         
         # Golden Cross (50>200): 10
-        if ('sma_50' in daily_data and 'sma_200' in daily_data and 
-            daily_data['sma_50'].iloc[-1] > daily_data['sma_200'].iloc[-1]):
+        if (
+            'sma_50' in daily_data and 'sma_200' in daily_data and 
+            pd.notna(daily_data['sma_50'].iloc[-1]) and
+            pd.notna(daily_data['sma_200'].iloc[-1]) and
+            daily_data['sma_50'].iloc[-1] > daily_data['sma_200'].iloc[-1]
+        ):
             score += 10
         
         # Supertrend (Daily) bullish: 8
-        if ('supertrend_direction' in daily_data and 
-            daily_data['supertrend_direction'].iloc[-1] == 'bullish'):
+        if (
+            'supertrend_direction' in daily_data and 
+            daily_data['supertrend_direction'].iloc[-1] == 'bullish'
+        ):
             score += 8
         
         # Supertrend (4H) bullish: 5
-        if ('supertrend_direction' in four_hour_data and 
-            four_hour_data['supertrend_direction'].iloc[-1] == 'bullish'):
+        if (
+            'supertrend_direction' in four_hour_data and 
+            four_hour_data['supertrend_direction'].iloc[-1] == 'bullish'
+        ):
             score += 5
         
         return score
@@ -446,7 +460,7 @@ class ScoringEngine:
         score = 0
         
         # Daily RSI 55-70: 10
-        if 'rsi_14' in daily_data:
+        if 'rsi_14' in daily_data and pd.notna(daily_data['rsi_14'].iloc[-1]):
             rsi = daily_data['rsi_14'].iloc[-1]
             if 55 <= rsi <= 70:
                 score += 10
@@ -454,20 +468,30 @@ class ScoringEngine:
                 score -= 5
         
         # Daily MACD line > signal: 8
-        if ('macd_line' in daily_data and 'macd_signal' in daily_data and 
-            daily_data['macd_line'].iloc[-1] > daily_data['macd_signal'].iloc[-1]):
+        if (
+            'macd_line' in daily_data and 'macd_signal' in daily_data and 
+            pd.notna(daily_data['macd_line'].iloc[-1]) and
+            pd.notna(daily_data['macd_signal'].iloc[-1]) and
+            daily_data['macd_line'].iloc[-1] > daily_data['macd_signal'].iloc[-1]
+        ):
             score += 8
         
         # Daily MACD hist > 0 and expanding: 6
-        if ('macd_hist' in daily_data and len(daily_data) >= 2 and 
+        if (
+            'macd_hist' in daily_data and len(daily_data) >= 2 and 
+            pd.notna(daily_data['macd_hist'].iloc[-1]) and pd.notna(daily_data['macd_hist'].iloc[-2]) and 
             daily_data['macd_hist'].iloc[-1] > 0 and 
-            daily_data['macd_hist'].iloc[-1] > daily_data['macd_hist'].iloc[-2]):
+            daily_data['macd_hist'].iloc[-1] > daily_data['macd_hist'].iloc[-2]
+        ):
             score += 6
         
         # 4H RSI > 55 and rising: 6
-        if ('rsi_14' in four_hour_data and len(four_hour_data) >= 2 and 
+        if (
+            'rsi_14' in four_hour_data and len(four_hour_data) >= 2 and 
+            pd.notna(four_hour_data['rsi_14'].iloc[-1]) and pd.notna(four_hour_data['rsi_14'].iloc[-2]) and 
             four_hour_data['rsi_14'].iloc[-1] > 55 and 
-            four_hour_data['rsi_14'].iloc[-1] > four_hour_data['rsi_14'].iloc[-2]):
+            four_hour_data['rsi_14'].iloc[-1] > four_hour_data['rsi_14'].iloc[-2]
+        ):
             score += 6
         
         return score
@@ -477,16 +501,19 @@ class ScoringEngine:
         score = 0
         
         # 20d Avg Vol ≥ 1M: 5
-        if 'volume_20d_avg' in daily_data and daily_data['volume_20d_avg'].iloc[-1] >= 1000000:
+        if 'volume_20d_avg' in daily_data and pd.notna(daily_data['volume_20d_avg'].iloc[-1]) and daily_data['volume_20d_avg'].iloc[-1] >= 1000000:
             score += 5
         
         # Session vol ≥ 1.2× 20d avg: 6
-        if ('volume_20d_avg' in daily_data and 'volume' in four_hour_data and 
-            four_hour_data['volume'].iloc[-1] >= 1.2 * daily_data['volume_20d_avg'].iloc[-1]):
+        if (
+            'volume_20d_avg' in daily_data and 'volume' in four_hour_data and 
+            pd.notna(four_hour_data['volume'].iloc[-1]) and pd.notna(daily_data['volume_20d_avg'].iloc[-1]) and 
+            four_hour_data['volume'].iloc[-1] >= 1.2 * daily_data['volume_20d_avg'].iloc[-1]
+        ):
             score += 6
         
         # OBV(20) slope > 0: 4
-        if 'obv_slope' in daily_data and daily_data['obv_slope'].iloc[-1] > 0:
+        if 'obv_slope' in daily_data and pd.notna(daily_data['obv_slope'].iloc[-1]) and daily_data['obv_slope'].iloc[-1] > 0:
             score += 4
         
         return score
@@ -498,14 +525,20 @@ class ScoringEngine:
         # Pullback to value: 6
         # This would require more complex logic to determine pullbacks
         # Simplified implementation
-        if ('ema_20' in daily_data and 'sma_50' in daily_data and 
-            daily_data['close'].iloc[-1] <= daily_data['ema_20'].iloc[-1] * 1.02):
+        if (
+            'ema_20' in daily_data and 'sma_50' in daily_data and 
+            pd.notna(daily_data['close'].iloc[-1]) and pd.notna(daily_data['ema_20'].iloc[-1]) and 
+            daily_data['close'].iloc[-1] <= daily_data['ema_20'].iloc[-1] * 1.02
+        ):
             score += 6
         
         # BB upper half (mid→upper): 4
-        if ('bb_middle' in daily_data and 'bb_upper' in daily_data and 
+        if (
+            'bb_middle' in daily_data and 'bb_upper' in daily_data and 
+            pd.notna(daily_data['close'].iloc[-1]) and pd.notna(daily_data['bb_middle'].iloc[-1]) and pd.notna(daily_data['bb_upper'].iloc[-1]) and 
             daily_data['close'].iloc[-1] > daily_data['bb_middle'].iloc[-1] and
-            daily_data['close'].iloc[-1] < daily_data['bb_upper'].iloc[-1]):
+            daily_data['close'].iloc[-1] < daily_data['bb_upper'].iloc[-1]
+        ):
             score += 4
         
         return score
@@ -515,12 +548,19 @@ class ScoringEngine:
         penalties = 0
         
         # Extended from 20EMA > +2.5×ATR(20): −6
-        if ('ema_20' in daily_data and 'atr_14' in daily_data and 
-            daily_data['close'].iloc[-1] > daily_data['ema_20'].iloc[-1] + 2.5 * daily_data['atr_14'].iloc[-1]):
+        if (
+            'ema_20' in daily_data and 'atr_14' in daily_data and 
+            pd.notna(daily_data['close'].iloc[-1]) and pd.notna(daily_data['ema_20'].iloc[-1]) and pd.notna(daily_data['atr_14'].iloc[-1]) and 
+            daily_data['close'].iloc[-1] > daily_data['ema_20'].iloc[-1] + 2.5 * daily_data['atr_14'].iloc[-1]
+        ):
             penalties -= 6
         
         # Gap-up > 2% at open: −3
-        if len(daily_data) >= 2 and daily_data['open'].iloc[-1] > daily_data['close'].iloc[-2] * 1.02:
+        if (
+            len(daily_data) >= 2 and 
+            pd.notna(daily_data['open'].iloc[-1]) and pd.notna(daily_data['close'].iloc[-2]) and 
+            daily_data['open'].iloc[-1] > daily_data['close'].iloc[-2] * 1.02
+        ):
             penalties -= 3
         
         return penalties
@@ -831,6 +871,12 @@ class TradingBot:
         if self.ibkr:
             try:
                 summary = self.ibkr.get_account_summary()
+                # IBKR tags vary; prefer NetLiquidation, then TotalCashValue
+                equity_str = summary.get("NetLiquidation") or summary.get("TotalCashValue")
+                try:
+                    self.account_equity = float(equity_str) if equity_str is not None else None
+                except Exception:
+                    self.account_equity = None
                 cash = summary.get("TotalCashValue")
                 buying_power = summary.get("BuyingPower")
                 self.logger.info(
@@ -838,8 +884,10 @@ class TradingBot:
                 )
             except Exception as e:  # pragma: no cover - network dependent
                 self.logger.warning(f"Unable to fetch account balance: {e}")
+                self.account_equity = None
         else:
             self.logger.info("Account balance unavailable: IBKR client not connected")
+            self.account_equity = None
 
         open_positions = [
             p for p in self.positions.values()
@@ -1017,12 +1065,17 @@ class TradingBot:
     
     def _place_entry_order(self, symbol, daily_data, four_hour_data, support_info, entry_score, score_components):
         """Place an entry order for a symbol"""
-        # Calculate position size
-        account_equity = ACCOUNT_EQUITY
+        # Resolve account equity (prefer live broker summary, fall back to env)
+        account_equity = getattr(self, "account_equity", None)
+        if account_equity is None or account_equity <= 0:
+            account_equity = ACCOUNT_EQUITY
         risk_per_trade = account_equity * RISK_PER_TRADE
-        
+
         current_price = four_hour_data['close'].iloc[-1]
-        atr = daily_data['atr_14'].iloc[-1]
+        atr = daily_data['atr_14'].iloc[-1] if 'atr_14' in daily_data else np.nan
+        if pd.isna(current_price) or pd.isna(atr) or atr <= 0:
+            self.logger.warning(f"Invalid pricing/ATR for {symbol}; skipping order placement")
+            return
         
         # Set stop loss below support
         stop_price = support_info['support_price'] - atr
@@ -1044,12 +1097,13 @@ class TradingBot:
         take_profit1 = current_price + 1.5 * risk_per_share  # 1.5R
         take_profit2 = current_price + 2.0 * risk_per_share  # 2.0R
         
+        # Create position id first so we can key orders under the position
+        position_id = f"POS_{symbol}_{datetime.now().timestamp()}"
         order_id = self.order_manager.place_bracket_order(
-            symbol, position_size, current_price, stop_price, take_profit1, take_profit2
+            symbol, position_size, current_price, stop_price, take_profit1, take_profit2, position_id=position_id
         )
         
         # Create position record
-        position_id = f"POS_{symbol}_{datetime.now().timestamp()}"
         position = Position(
             position_id=position_id,
             symbol=symbol,

@@ -53,3 +53,6 @@ RISK_OFF_NEWS_THRESHOLD = float(os.getenv('RISK_OFF_NEWS_THRESHOLD', '0'))
 ACCOUNT_EQUITY = float(os.getenv('ACCOUNT_EQUITY', '100000'))
 RISK_PER_TRADE = float(os.getenv('RISK_PER_TRADE', '0.01'))
 MAX_POSITION_PCT = float(os.getenv('MAX_POSITION_PCT', '0.1'))
+
+# Trading controls
+ENABLE_TRADING = os.getenv('ENABLE_TRADING', '0') == '1'
