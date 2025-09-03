@@ -22,6 +22,9 @@ class OrderManager:
         """
         Place a bracket order (entry + OCO stop loss/take profit)
         """
+        # Ensure quantity is an integer to avoid fractional share submissions
+        quantity = int(quantity)
+
         # Generate unique IDs
         entry_id = f"{symbol}_{datetime.now().timestamp()}_ENTRY"
         stop_id = f"{symbol}_{datetime.now().timestamp()}_STOP"
@@ -202,6 +205,7 @@ class OrderManager:
         qty = quantity if quantity is not None else (
             original_order.quantity - original_order.filled_quantity
         )
+        qty = int(qty)
         new_id = f"{original_order.symbol}_{datetime.now().timestamp()}_STOP"
         stop_order = Order(
             order_id=new_id,
