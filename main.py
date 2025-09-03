@@ -15,6 +15,10 @@ logging.basicConfig(
     ],
 )
 
+# Silence verbose logs from the underlying IB API client and wrapper
+logging.getLogger("ibapi.wrapper").setLevel(logging.WARNING)
+logging.getLogger("ibapi.client").setLevel(logging.WARNING)
+
 
 def main():
     """Entry point for running the trading bot."""

@@ -52,12 +52,31 @@ PUSHOVER_USER=
 PUSHOVER_TOKEN=
 DEBUG=0
 SP100_CSV=
+ENTRY_SCORE_THRESHOLD=70
+SUPPORT_DISTANCE_ATR=0.5
+SUPPORT_DISTANCE_PCT=0.5
+FG_HARD_BLOCK_THRESHOLD=25
+FG_PENALTY_THRESHOLD=45
+FG_OVERHEAT_THRESHOLD=80
+FG_PENALTY=5
+FG_OVERHEAT_PENALTY=5
+NEWS_POSITIVE_THRESHOLD=0.7
+NEWS_NEGATIVE_THRESHOLD=-0.7
+NEWS_POSITIVE_BONUS=3
+NEWS_NEGATIVE_PENALTY=5
+RISK_OFF_MIN_SCORE=85
+RISK_OFF_NEWS_THRESHOLD=0
+ACCOUNT_EQUITY=100000
+RISK_PER_TRADE=0.01
+MAX_POSITION_PCT=0.1
 ```
 
 `PUSHOVER_USER` and `PUSHOVER_TOKEN` enable optional push notifications via the
 [Pushover](https://pushover.net/) service.  Set `DEBUG` to ``1`` for verbose
 logging.  `SP100_CSV` should point to a CSV file containing the S&P 100
-constituents.  Defaults are provided when the variables are absent.
+constituents. Entry thresholds, sentiment gates and risk parameters can be
+adjusted through the variables above. Defaults are provided when values are
+absent.
 
 ## Installation
 
